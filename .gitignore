@@ -53,6 +53,12 @@ Thumbs.db
 .claude/settings.local.json
 .cursor/**/settings.local.json
 
+# Agent and dev guidance kept local
+CLAUDE.md
+AGENTS.md
+.cursor/rules/
+.github/copilot-instructions.md
+
 # Planning docs kept local for now
 PLAN.md
 Info.md
