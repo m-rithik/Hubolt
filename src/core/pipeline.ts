@@ -44,6 +44,8 @@ export async function runReviewPipeline(params: RunPipelineParams): Promise<Revi
 }
 
 export function toFinding(finding: LLMFinding): Finding {
+  const suggestion = finding.suggestion.trim();
+
   return {
     fingerprint: fingerprint(finding),
     ruleId: finding.ruleId,
@@ -53,10 +55,15 @@ export function toFinding(finding: LLMFinding): Finding {
     severity: finding.severity,
     confidenceLabel: finding.confidenceLabel,
     source: "llm",
-    range: finding.range,
+    range: {
+      file: finding.range.file,
+      startLine: finding.range.startLine,
+      endLine: finding.range.endLine,
+      diffSide: "right"
+    },
     evidence: finding.evidence,
     impact: finding.impact,
-    suggestion: finding.suggestion,
+    suggestion: suggestion.length > 0 ? suggestion : undefined,
     verification: finding.verification,
     relatedSignals: [],
     tags: []

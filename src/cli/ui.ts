@@ -6,8 +6,11 @@ const ansi = {
   dim: "\x1b[2m",
   green: "\x1b[32m",
   red: "\x1b[31m",
+  yellow: "\x1b[33m",
   cyan: "\x1b[36m",
-  gray: "\x1b[90m"
+  gray: "\x1b[90m",
+  white: "\x1b[97m",
+  bgRed: "\x1b[41m"
 };
 
 function style(value: string, codes: string[]): string {
@@ -31,6 +34,15 @@ export const ui = {
   },
   error(value: string): string {
     return style(value, [ansi.red]);
+  },
+  warn(value: string): string {
+    return style(value, [ansi.yellow]);
+  },
+  info(value: string): string {
+    return style(value, [ansi.cyan]);
+  },
+  critical(value: string): string {
+    return style(` ${value} `, [ansi.bold, ansi.white, ansi.bgRed]);
   },
   label(value: string): string {
     return style(value, [ansi.dim]);
@@ -57,5 +69,20 @@ export const ui = {
   },
   rule(): string {
     return ui.muted("--------------------------------------------------");
+  },
+  grid(headers: string[], rows: string[][], indent = 2): string {
+    const widths = headers.map((header, column) =>
+      Math.max(visibleLength(header), ...rows.map((row) => visibleLength(row[column] ?? "")))
+    );
+    const prefix = " ".repeat(indent);
+    const pad = (value: string, width: number): string =>
+      value + " ".repeat(Math.max(0, width - visibleLength(value)));
+
+    const headerLine = prefix + headers.map((header, column) => ui.label(pad(header, widths[column]))).join("  ");
+    const body = rows.map(
+      (row) => prefix + row.map((cell, column) => pad(cell ?? "", widths[column])).join("  ").trimEnd()
+    );
+
+    return [headerLine, ...body].join("\n");
   }
 };

@@ -3,6 +3,7 @@
 import { Command } from "commander";
 import { handleCliError } from "./errors.js";
 import { registerConfigCommand } from "./commands/config.js";
+import { registerLogsCommand } from "./commands/logs.js";
 import { registerReviewCommand } from "./commands/review.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { configureCliHelp, renderHome } from "./help.js";
@@ -17,6 +18,7 @@ program
 registerSetupCommand(program);
 registerConfigCommand(program);
 registerReviewCommand(program);
+registerLogsCommand(program);
 configureCliHelp(program);
 
 program.action(() => {

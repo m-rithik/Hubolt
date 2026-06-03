@@ -13,11 +13,13 @@ export function renderHome(): string {
     "",
     ui.title("Commands"),
     ui.table([
-      ["hubolt setup", "interactive setup; saves provider/model/key to .env"],
+      ["hubolt setup", "pick a provider (OpenAI/Claude/Google); saves to .env"],
       ["hubolt setup --print", "print a starter .hubolt.yml"],
       ["hubolt config validate", "validate config, defaults, and credentials"],
-      ["hubolt review", "resolve the review scope for working-tree changes"],
-      ["hubolt review --staged", "resolve the review scope for staged changes"]
+      ["hubolt review", "review working-tree changes with the LLM"],
+      ["hubolt review --staged", "review staged changes"],
+      ["hubolt logs tail", "show recent review events"],
+      ["hubolt logs inspect", "summarize the local event log"]
     ]),
     "",
     ui.muted("Run hubolt --help for the full command list. The analysis engine is not implemented yet.")

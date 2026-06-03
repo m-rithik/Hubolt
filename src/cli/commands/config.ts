@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { resolveSettings } from "../../config/resolve.js";
+import { getProviderInfo } from "../../providers/llm/catalog.js";
 import { runSafely } from "../errors.js";
 import { ui } from "../ui.js";
 
@@ -25,9 +26,10 @@ export function registerConfigCommand(program: Command): void {
           ["LLM model", settings.llmModel]
         ];
 
-        if (settings.llmProvider === "openai") {
-          const present = Boolean(process.env.OPENAI_API_KEY);
-          rows.push(["OPENAI_API_KEY", present ? ui.success("set") : ui.error("missing")]);
+        const provider = getProviderInfo(settings.llmProvider);
+        if (provider) {
+          const present = Boolean(process.env[provider.apiKeyEnv]);
+          rows.push([provider.apiKeyEnv, present ? ui.success("set") : ui.error("missing")]);
         }
 
         console.log(ui.section("Hubolt Config", rows));

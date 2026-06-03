@@ -48,20 +48,30 @@ export const FindingSchema = z.object({
 export type Finding = z.infer<typeof FindingSchema>;
 
 /**
- * The subset of a finding the LLM is allowed to produce. Identity fields
- * (fingerprint, source) are assigned by the pipeline, not the model.
+ * The subset of a finding the LLM produces. Kept strict-structured-output
+ * friendly for OpenAI: every field is required, with no optionals, defaults,
+ * or value constraints (those keywords are unsupported in strict mode). The
+ * pipeline assigns identity (fingerprint, source) and maps this onto the rich
+ * Finding/ReviewRange shape.
  */
+export const LLMRangeSchema = z.object({
+  file: z.string(),
+  startLine: z.number().int(),
+  endLine: z.number().int()
+});
+export type LLMRange = z.infer<typeof LLMRangeSchema>;
+
 export const LLMFindingSchema = z.object({
-  ruleId: z.string().min(1),
-  title: z.string().min(1),
-  message: z.string().min(1),
+  ruleId: z.string(),
+  title: z.string(),
+  message: z.string(),
   category: FindingCategorySchema,
   severity: SeveritySchema,
   confidenceLabel: z.enum(["low", "medium", "high"]),
-  range: ReviewRangeSchema,
-  evidence: z.array(z.string().min(1)).min(1),
-  impact: z.string().min(1),
-  suggestion: z.string().optional(),
-  verification: z.string().min(1)
+  range: LLMRangeSchema,
+  evidence: z.array(z.string()),
+  impact: z.string(),
+  suggestion: z.string(),
+  verification: z.string()
 });
 export type LLMFinding = z.infer<typeof LLMFindingSchema>;

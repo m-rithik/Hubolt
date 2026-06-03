@@ -13,9 +13,10 @@ function llmFinding(overrides: Partial<LLMFinding> = {}): LLMFinding {
     category: "performance",
     severity: "high",
     confidenceLabel: "high",
-    range: { file: "src/a.ts", startLine: 10, endLine: 12, diffSide: "right" },
+    range: { file: "src/a.ts", startLine: 10, endLine: 12 },
     evidence: ["evidence"],
     impact: "impact",
+    suggestion: "",
     verification: "verification",
     ...overrides
   };
@@ -42,8 +43,8 @@ describe("runReviewPipeline", () => {
     const llm = fakeProvider([
       llmFinding(),
       llmFinding(),
-      llmFinding({ severity: "info", ruleId: "style.naming", range: { file: "src/a.ts", startLine: 3, endLine: 3, diffSide: "right" } }),
-      llmFinding({ range: { file: "src/other.ts", startLine: 1, endLine: 1, diffSide: "right" } })
+      llmFinding({ severity: "info", ruleId: "style.naming", range: { file: "src/a.ts", startLine: 3, endLine: 3 } }),
+      llmFinding({ range: { file: "src/other.ts", startLine: 1, endLine: 1 } })
     ]);
 
     const result = await runReviewPipeline({ context, config, llm });
