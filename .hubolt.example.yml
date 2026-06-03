@@ -1,0 +1,41 @@
+mode: balanced
+severityThreshold: medium
+failOnSeverity: critical
+commentBudget: 8
+maxFileSizeKb: 256
+maxContextTokens: 60000
+
+providers:
+  llm: openai
+  model: gpt-4.1-mini
+
+privacy:
+  redactSecrets: true
+  showContextSentToModel: true
+  allowExternalModels: true
+
+security:
+  enabled: false
+  failOnSeverity: high
+  includeSecretScan: true
+  includeDependencyAudit: true
+  includeSemgrepSecurityRules: true
+  includeAuthAndInputValidationChecks: true
+  commentBudget: 12
+  lowConfidenceToSummaryOnly: true
+
+analyzers:
+  typescript: true
+  eslint: true
+  semgrep: true
+  secrets: true
+  dependencies: true
+
+ignore:
+  - dist/**
+  - build/**
+  - coverage/**
+  - "**/*.test.ts"
+
+rules:
+  - "API handlers must validate request bodies before using them."

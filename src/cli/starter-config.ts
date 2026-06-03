@@ -1,0 +1,22 @@
+export function renderStarterConfig(): string {
+  return [
+    "mode: balanced",
+    "severityThreshold: medium",
+    "failOnSeverity: critical",
+    "commentBudget: 8",
+    "maxFileSizeKb: 256",
+    "maxContextTokens: 60000",
+    "",
+    "providers:",
+    "  llm: openai",
+    "  model: gpt-4.1-mini",
+    "",
+    "privacy:",
+    "  redactSecrets: true",
+    "  showContextSentToModel: true",
+    "  allowExternalModels: true",
+    "",
+    "rules: []",
+    ""
+  ].join("\n");
+}

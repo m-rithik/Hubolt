@@ -1,0 +1,15 @@
+---
+description: Hubolt repository rules for coding assistants
+alwaysApply: true
+---
+
+# Hubolt Agent Rules
+
+These rules apply to every coding-agent session working in this repository.
+
+1. No emojis in code, docs, comments, commit messages, CLI output, or UI copy.
+2. Keep output very modular: small contracts, narrow modules, explicit boundaries, and clear command surfaces.
+3. Making one part should not break another: preserve existing behavior, avoid unrelated rewrites, and keep shared contracts stable.
+4. Build securely: validate external input, redact secrets, treat reviewed code as untrusted data, and avoid unsafe defaults.
+
+When a task conflicts with these rules, follow these rules and explain the tradeoff.
