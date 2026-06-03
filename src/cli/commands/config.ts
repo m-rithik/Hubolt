@@ -17,16 +17,20 @@ export function registerConfigCommand(program: Command): void {
     .action((options: ConfigValidateOptions) => {
       runSafely(() => {
         const settings = resolveSettings({ configPath: options.config });
+        const rows: Array<[string, string]> = [
+          ["Status", ui.success("valid")],
+          ["Config source", settings.configPath ?? "built-in defaults"],
+          ["Mode", settings.mode],
+          ["LLM provider", settings.llmProvider],
+          ["LLM model", settings.llmModel]
+        ];
 
-        console.log(
-          ui.section("Hubolt Config", [
-            ["Status", ui.success("valid")],
-            ["Config source", settings.configPath ?? "built-in defaults"],
-            ["Mode", settings.mode],
-            ["LLM provider", settings.llmProvider],
-            ["LLM model", settings.llmModel]
-          ])
-        );
+        if (settings.llmProvider === "openai") {
+          const present = Boolean(process.env.OPENAI_API_KEY);
+          rows.push(["OPENAI_API_KEY", present ? ui.success("set") : ui.error("missing")]);
+        }
+
+        console.log(ui.section("Hubolt Config", rows));
       });
     });
 }

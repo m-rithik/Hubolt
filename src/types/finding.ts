@@ -46,3 +46,22 @@ export const FindingSchema = z.object({
   tags: z.array(z.string()).default([])
 });
 export type Finding = z.infer<typeof FindingSchema>;
+
+/**
+ * The subset of a finding the LLM is allowed to produce. Identity fields
+ * (fingerprint, source) are assigned by the pipeline, not the model.
+ */
+export const LLMFindingSchema = z.object({
+  ruleId: z.string().min(1),
+  title: z.string().min(1),
+  message: z.string().min(1),
+  category: FindingCategorySchema,
+  severity: SeveritySchema,
+  confidenceLabel: z.enum(["low", "medium", "high"]),
+  range: ReviewRangeSchema,
+  evidence: z.array(z.string().min(1)).min(1),
+  impact: z.string().min(1),
+  suggestion: z.string().optional(),
+  verification: z.string().min(1)
+});
+export type LLMFinding = z.infer<typeof LLMFindingSchema>;

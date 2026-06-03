@@ -1,18 +1,20 @@
-import type { LLMProvider } from "../../types/providers.js";
+import type { LLMProvider, LLMProviderOptions } from "../../types/providers.js";
 
-const providers = new Map<string, () => LLMProvider>();
+export type LLMProviderFactory = (options: LLMProviderOptions) => LLMProvider;
 
-export function registerLLMProvider(name: string, makeProvider: () => LLMProvider): void {
+const providers = new Map<string, LLMProviderFactory>();
+
+export function registerLLMProvider(name: string, makeProvider: LLMProviderFactory): void {
   providers.set(name, makeProvider);
 }
 
-export function getLLMProvider(name: string): LLMProvider {
+export function getLLMProvider(name: string, options: LLMProviderOptions): LLMProvider {
   const makeProvider = providers.get(name);
   if (!makeProvider) {
     throw new Error(`Unknown LLM provider: ${name}`);
   }
 
-  return makeProvider();
+  return makeProvider(options);
 }
 
 export function listLLMProviders(): string[] {

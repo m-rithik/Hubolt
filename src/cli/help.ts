@@ -13,9 +13,9 @@ export function renderHome(): string {
     "",
     ui.title("Commands"),
     ui.table([
-      ["hubolt setup", "print a starter .hubolt.yml"],
-      ["hubolt setup --write", "create .hubolt.yml in this repo"],
-      ["hubolt config validate", "validate config and defaults"],
+      ["hubolt setup", "interactive setup; saves provider/model/key to .env"],
+      ["hubolt setup --print", "print a starter .hubolt.yml"],
+      ["hubolt config validate", "validate config, defaults, and credentials"],
       ["hubolt review", "resolve the review scope for working-tree changes"],
       ["hubolt review --staged", "resolve the review scope for staged changes"]
     ]),

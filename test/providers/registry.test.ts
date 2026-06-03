@@ -32,12 +32,12 @@ describe("LLM provider registry", () => {
   test("registers, resolves, and lists a provider", () => {
     registerLLMProvider("fake-llm", () => fakeLLM);
 
-    expect(getLLMProvider("fake-llm")).toBe(fakeLLM);
+    expect(getLLMProvider("fake-llm", { model: "test" })).toBe(fakeLLM);
     expect(listLLMProviders()).toContain("fake-llm");
   });
 
   test("throws on an unknown provider", () => {
-    expect(() => getLLMProvider("missing")).toThrow("Unknown LLM provider: missing");
+    expect(() => getLLMProvider("missing", { model: "test" })).toThrow("Unknown LLM provider: missing");
   });
 });
 

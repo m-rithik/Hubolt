@@ -5,7 +5,7 @@ export type ReviewEventHandler = (event: ReviewEvent) => void | Promise<void>;
 export class InProcessReviewEventEmitter {
   private readonly handlers = new Map<string, ReviewEventHandler[]>();
 
-  on(type: ReviewEvent["type"], handler: ReviewEventHandler): void {
+  on(type: ReviewEvent["type"] | "*", handler: ReviewEventHandler): void {
     const handlers = this.handlers.get(type) ?? [];
     handlers.push(handler);
     this.handlers.set(type, handlers);

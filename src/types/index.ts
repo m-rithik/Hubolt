@@ -1,10 +1,12 @@
 export {
   FindingCategorySchema,
   FindingSchema,
+  LLMFindingSchema,
   ReviewRangeSchema,
   SeveritySchema,
   type Finding,
   type FindingCategory,
+  type LLMFinding,
   type ReviewRange,
   type Severity
 } from "./finding.js";
@@ -16,5 +18,11 @@ export type {
   ReviewBudget,
   ReviewContext
 } from "./review-context.js";
-export type { AnalyzerProvider, AnalyzerSignal, LLMProvider, LLMReviewInput, PromptConfig } from "./providers.js";
+export type {
+  AnalyzerProvider,
+  AnalyzerSignal,
+  LLMProvider,
+  LLMProviderOptions,
+  LLMReviewRequest
+} from "./providers.js";
 export type { ReviewSummary } from "./reports.js";

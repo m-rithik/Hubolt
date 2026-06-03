@@ -1,4 +1,4 @@
-import type { Finding, ReviewRange, Severity } from "./finding.js";
+import type { LLMFinding, ReviewRange, Severity } from "./finding.js";
 import type { ReviewContext } from "./review-context.js";
 
 export interface AnalyzerSignal {
@@ -12,19 +12,18 @@ export interface AnalyzerSignal {
   raw?: unknown;
 }
 
-export interface PromptConfig {
+export interface LLMReviewRequest {
   system: string;
-  behaviorPack?: string;
+  user: string;
 }
 
-export interface LLMReviewInput {
-  context: ReviewContext;
-  prompt: string;
+export interface LLMProviderOptions {
+  model: string;
 }
 
 export interface LLMProvider {
   readonly name: string;
-  review(input: LLMReviewInput, cfg: PromptConfig): Promise<Finding[]>;
+  review(request: LLMReviewRequest): Promise<LLMFinding[]>;
 }
 
 export interface AnalyzerProvider {

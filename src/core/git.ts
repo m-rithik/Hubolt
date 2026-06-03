@@ -79,3 +79,21 @@ export function getChangedFiles(options: ChangedFilesOptions = {}): ChangedFile[
 
   return parseNameStatus(output);
 }
+
+export function getDiffText(options: ChangedFilesOptions = {}): string {
+  const cwd = options.cwd ?? process.cwd();
+  const args = ["diff", "--unified=3"];
+
+  if (options.base && options.head) {
+    args.push(options.base, options.head);
+  } else if (options.staged) {
+    args.push("--cached");
+  }
+
+  try {
+    return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`git diff failed: ${detail}`);
+  }
+}
