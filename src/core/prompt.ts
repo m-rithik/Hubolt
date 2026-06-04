@@ -9,6 +9,9 @@ export interface BuiltPrompt {
   user: string;
 }
 
+/** Bump when the prompt structure or policy changes; surfaced in eval and useful for cache keys. */
+export const PROMPT_VERSION = "1";
+
 const CATEGORIES =
   "quality, security, performance, bestPractice, architecture, refactor, test, documentation";
 const PROMPT_REDACTION_PLACEHOLDER = "[HUBOLT_REDACTED_SECRET]";

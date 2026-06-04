@@ -29,4 +29,4 @@ export type {
   LLMProviderOptions,
   LLMReviewRequest
 } from "./providers.js";
-export type { ReviewSummary } from "./reports.js";
+export { ReviewReportSchema, parseReport, type ReviewReport, type SeverityCounts } from "./reports.js";

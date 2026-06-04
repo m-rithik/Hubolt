@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { resolveSettings } from "../../config/resolve.js";
 import { DEFAULT_FIXTURE_DIR, loadFixtures, type Fixture } from "../../eval/fixtures.js";
 import { evaluateGate, runEval, type EvalRun } from "../../eval/runner.js";
+import { PROMPT_VERSION } from "../../core/prompt.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import { runSafelyAsync } from "../errors.js";
 import { ui } from "../ui.js";
@@ -50,6 +51,7 @@ async function runEvalCommand(options: EvalOptions): Promise<void> {
     ui.section("Hubolt Eval", [
       ["Fixtures", String(fixtures.length)],
       ["Provider", `${providerName} (${modelName})`],
+      ["Prompt version", PROMPT_VERSION],
       ["Dir", dir]
     ])
   );

@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import type { Command } from "commander";
 import type { RepoConfig } from "../../config/schema.js";
 import { resolveSettings, type ResolvedSettings } from "../../config/resolve.js";
@@ -8,9 +9,11 @@ import { InProcessReviewEventEmitter } from "../../core/events.js";
 import { getGitRoot, isGitRepository } from "../../core/git.js";
 import { runReviewPipeline, type ReviewResult } from "../../core/pipeline.js";
 import { severityRank } from "../../core/rank.js";
+import { buildReport, renderJsonReport, renderMarkdownReport } from "../../report/index.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import { createReviewEvent } from "../../types/events.js";
 import { CONTEXT_ADJACENT_TAG, SeveritySchema, type AnalyzerSignal, type Finding, type Severity } from "../../types/finding.js";
+import type { LLMProvider } from "../../types/providers.js";
 import { runSafelyAsync } from "../errors.js";
 import { startSpinner } from "../spinner.js";
 import { ui } from "../ui.js";
@@ -25,7 +28,19 @@ interface ReviewOptions {
   model?: string;
   security?: boolean;
   failOn?: string;
+  /** Commander sets this to false when --no-llm is passed. */
+  llm?: boolean;
+  json?: string;
+  md?: string;
 }
+
+/** Analyzer-only provider used by --no-llm: contributes no LLM findings. */
+const NO_LLM_PROVIDER: LLMProvider = {
+  name: "none",
+  async review() {
+    return [];
+  }
+};
 
 interface RunOptions {
   /** Set process exit code when a finding reaches the fail-on severity (CI gate). */
@@ -43,6 +58,9 @@ export function registerReviewCommand(program: Command): void {
     .option("--provider <name>", "override the LLM provider for this run (openai, claude, google)")
     .option("--model <model>", "override the LLM model for this run")
     .option("--security", "run a security-scoped review (security categories only)")
+    .option("--no-llm", "skip the model; emit analyzer-only findings (no API key needed)")
+    .option("--json <path>", "write a JSON report to this path")
+    .option("--md <path>", "write a Markdown report to this path")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: ReviewOptions) => {
       void runSafelyAsync(() => runReview(options));
@@ -59,6 +77,8 @@ export function registerSecurityCommand(program: Command): void {
     .option("--fail-on <severity>", "exit non-zero when a finding reaches this severity (info|low|medium|high|critical)")
     .option("--provider <name>", "override the LLM provider for this run (openai, claude, google)")
     .option("--model <model>", "override the LLM model for this run")
+    .option("--json <path>", "write a JSON report to this path")
+    .option("--md <path>", "write a Markdown report to this path")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: ReviewOptions) => {
       void runSafelyAsync(() => runReview({ ...options, security: true }, { failOnExit: true }));
@@ -83,9 +103,14 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
   const repoConfig: RepoConfig = securityMode ? { ...baseSettings.repo, mode: "security" } : baseSettings.repo;
   const settings: ResolvedSettings = { ...baseSettings, mode: repoConfig.mode, repo: repoConfig };
 
+  // The security gate uses security.failOnSeverity (default "high"), distinct
+  // from the top-level failOnSeverity (default "critical") that drives the
+  // report status. Both have schema defaults, so this is never undefined.
   const failOn = parseFailOn(options.failOn) ?? settings.repo.security.failOnSeverity;
+  const useLlm = options.llm !== false;
   const providerName = options.provider ?? settings.llmProvider;
   const modelName = options.model ?? settings.llmModel;
+  const providerLabel = useLlm ? `${providerName} (${modelName})` : "none (analyzers only)";
   const context = await buildContext({
     cwd: repo,
     staged: options.staged,
@@ -112,7 +137,7 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     })
   );
 
-  printHeader(context, settings, providerName, modelName);
+  printHeader(context, settings, providerLabel);
 
   if (context.reviewable.length === 0) {
     await emitter.emit(
@@ -129,8 +154,11 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
 
   const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode);
 
-  const llm = getLLMProvider(providerName, { model: modelName });
-  const spinner = startSpinner(`Reviewing ${context.reviewable.length} file(s) with ${providerName}...`);
+  const llm = useLlm ? getLLMProvider(providerName, { model: modelName }) : NO_LLM_PROVIDER;
+  const spinnerLabel = useLlm
+    ? `Reviewing ${context.reviewable.length} file(s) with ${providerName}...`
+    : `Analyzing ${context.reviewable.length} file(s) (no model call)...`;
+  const spinner = startSpinner(spinnerLabel);
   let result;
   try {
     result = await runReviewPipeline({ context, config: settings.repo, llm, analyzerSignals });
@@ -175,8 +203,37 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
 
   printResult(result);
 
+  writeReports(options, {
+    scope: context.scope,
+    config: settings.repo,
+    provider: useLlm ? providerName : "none",
+    model: useLlm ? modelName : "none",
+    result,
+    analyzerSignals
+  });
+
   if (runOptions.failOnExit) {
     applyFailOnGate(result, failOn);
+  }
+}
+
+/** Write JSON and/or Markdown reports when --json/--md were provided. */
+function writeReports(
+  options: ReviewOptions,
+  params: Parameters<typeof buildReport>[0]
+): void {
+  if (!options.json && !options.md) {
+    return;
+  }
+
+  const report = buildReport(params);
+  if (options.json) {
+    writeFileSync(options.json, renderJsonReport(report));
+    console.log(ui.muted(`Wrote JSON report to ${options.json}`));
+  }
+  if (options.md) {
+    writeFileSync(options.md, renderMarkdownReport(report));
+    console.log(ui.muted(`Wrote Markdown report to ${options.md}`));
   }
 }
 
@@ -245,19 +302,14 @@ async function collectAnalyzerSignals(
   return signals;
 }
 
-function printHeader(
-  context: BuiltContext,
-  settings: ResolvedSettings,
-  provider: string,
-  model: string
-): void {
+function printHeader(context: BuiltContext, settings: ResolvedSettings, providerLabel: string): void {
   const title = settings.mode === "security" ? "Hubolt Security Review" : "Hubolt Review";
   console.log(
     ui.section(title, [
       ["Scope", context.scope],
       ["Config", settings.configPath ?? "built-in defaults"],
       ["Mode", settings.mode],
-      ["Provider", `${provider} (${model})`],
+      ["Provider", providerLabel],
       ["Files reviewed", String(context.reviewable.length)]
     ])
   );

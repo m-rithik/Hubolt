@@ -6,6 +6,7 @@ import { registerAnalyzeCommand } from "./commands/analyze.js";
 import { registerConfigCommand } from "./commands/config.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerLogsCommand } from "./commands/logs.js";
+import { registerReportCommand } from "./commands/report.js";
 import { registerReviewCommand, registerSecurityCommand } from "./commands/review.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { configureCliHelp, renderHome } from "./help.js";
@@ -23,6 +24,7 @@ registerReviewCommand(program);
 registerSecurityCommand(program);
 registerAnalyzeCommand(program);
 registerEvalCommand(program);
+registerReportCommand(program);
 registerLogsCommand(program);
 configureCliHelp(program);
 
