@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { redactSecrets } from "../../src/core/redact.js";
+import { redactSecrets, scanSecrets } from "../../src/core/redact.js";
 
 describe("redactSecrets", () => {
   test("redacts secret-like assignments but keeps the key name and line", () => {
@@ -52,6 +52,14 @@ describe("redactSecrets", () => {
     expect(text).toContain("[REDACTED]");
   });
 
+  test("redacts modern OpenAI project keys", () => {
+    const key = "sk-proj-1234567890123456789012345678901234567890";
+    const { text, count } = redactSecrets(`const key = "${key}";`);
+
+    expect(text).toBe('const key = "[REDACTED]";');
+    expect(count).toBe(1);
+  });
+
   test("redacts jwt values even when the payload does not start with eyJ", () => {
     const token = "eyJhbGciOiJIUzI1NiJ9.MTIzNDU2Nzg5MGFiY2RlZg.c2lnbmF0dXJlMTIzNDU2";
     const { text, count } = redactSecrets(`const value = "${token}";`);
@@ -71,6 +79,23 @@ describe("redactSecrets", () => {
     expect(lines[1]).toBe("[REDACTED]");
     expect(lines[2]).toBe("[REDACTED]");
     expect(lines[3]).toContain("END RSA PRIVATE KEY");
+  });
+
+  test("redacts PEM material on begin and end marker lines", () => {
+    const input = [
+      "-----BEGIN PRIVATE KEY-----MIIEvg",
+      "body",
+      "tail-----END PRIVATE KEY-----",
+      "const total = price * quantity;"
+    ].join("\n");
+
+    const { text, count } = redactSecrets(input);
+    const lines = text.split("\n");
+    expect(count).toBe(3);
+    expect(lines[0]).toBe("-----BEGIN PRIVATE KEY-----[REDACTED]");
+    expect(lines[1]).toBe("[REDACTED]");
+    expect(lines[2]).toBe("[REDACTED]-----END PRIVATE KEY-----");
+    expect(lines[3]).toBe("const total = price * quantity;");
   });
 
   test("redacts inline PEM blocks without redacting following lines", () => {
@@ -94,5 +119,69 @@ describe("redactSecrets", () => {
   test("preserves total line count", () => {
     const input = "line1\nconst token = \"abcd1234efgh\";\nline3";
     expect(redactSecrets(input).text.split("\n")).toHaveLength(3);
+  });
+});
+
+describe("scanSecrets", () => {
+  test("reports the line and rule for a hardcoded credential without the value", () => {
+    const input = "const x = 1;\nconst apiKey = \"sk-supersecretvalue1234567890\";";
+    const matches = scanSecrets(input);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+    const credential = matches.find((match) => match.line === 2);
+    expect(credential?.ruleId).toBeDefined();
+    for (const match of matches) {
+      expect(match.message).not.toContain("supersecret");
+    }
+  });
+
+  test("reports modern OpenAI project keys without the value", () => {
+    const key = "sk-proj-1234567890123456789012345678901234567890";
+    const matches = scanSecrets(`const key = "${key}";`);
+
+    expect(matches).toContainEqual({
+      line: 1,
+      ruleId: "secret.openai-key",
+      message: "Possible OpenAI API key detected."
+    });
+    for (const match of matches) {
+      expect(match.message).not.toContain(key);
+    }
+  });
+
+  test("flags a private key body on the right line", () => {
+    const input = ["a", "-----BEGIN RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEA", "-----END RSA PRIVATE KEY-----"].join("\n");
+    const matches = scanSecrets(input);
+    expect(matches).toEqual([{ line: 3, ruleId: "secret.private-key", message: "Private key material detected." }]);
+  });
+
+  test("flags PEM material on begin and end marker lines", () => {
+    const input = [
+      "-----BEGIN PRIVATE KEY-----MIIEvg",
+      "body",
+      "tail-----END PRIVATE KEY-----",
+      "const total = price * quantity;"
+    ].join("\n");
+
+    expect(scanSecrets(input)).toEqual([
+      { line: 1, ruleId: "secret.private-key", message: "Private key material detected." },
+      { line: 2, ruleId: "secret.private-key", message: "Private key material detected." },
+      { line: 3, ruleId: "secret.private-key", message: "Private key material detected." }
+    ]);
+  });
+
+  test("flags multiple inline private keys without regex state leakage", () => {
+    const input = [
+      "-----BEGIN PRIVATE KEY-----abc123-----END PRIVATE KEY-----",
+      "-----BEGIN PRIVATE KEY-----def456-----END PRIVATE KEY-----"
+    ].join("\n");
+
+    expect(scanSecrets(input)).toEqual([
+      { line: 1, ruleId: "secret.private-key", message: "Private key material detected." },
+      { line: 2, ruleId: "secret.private-key", message: "Private key material detected." }
+    ]);
+  });
+
+  test("returns nothing for ordinary code", () => {
+    expect(scanSecrets("const total = price * quantity;")).toEqual([]);
   });
 });

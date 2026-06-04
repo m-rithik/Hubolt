@@ -2,6 +2,7 @@
 
 import { Command } from "commander";
 import { handleCliError } from "./errors.js";
+import { registerAnalyzeCommand } from "./commands/analyze.js";
 import { registerConfigCommand } from "./commands/config.js";
 import { registerLogsCommand } from "./commands/logs.js";
 import { registerReviewCommand } from "./commands/review.js";
@@ -18,6 +19,7 @@ program
 registerSetupCommand(program);
 registerConfigCommand(program);
 registerReviewCommand(program);
+registerAnalyzeCommand(program);
 registerLogsCommand(program);
 configureCliHelp(program);
 

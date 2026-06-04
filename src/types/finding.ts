@@ -55,6 +55,24 @@ export type Finding = z.infer<typeof FindingSchema>;
 export const CONTEXT_ADJACENT_TAG = "context-adjacent";
 
 /**
+ * A raw signal from a static analyzer (TypeScript, ESLint, Semgrep, secrets,
+ * dependencies). Signals are inputs to the review pipeline: they can become
+ * findings directly or be triaged by the LLM. Evidence must never contain a
+ * secret value.
+ */
+export const AnalyzerSignalSchema = z.object({
+  id: z.string().min(1),
+  analyzer: z.string().min(1),
+  ruleId: z.string().min(1),
+  range: ReviewRangeSchema,
+  severity: SeveritySchema,
+  message: z.string().min(1),
+  evidence: z.array(z.string()).default([]),
+  raw: z.unknown().optional()
+});
+export type AnalyzerSignal = z.infer<typeof AnalyzerSignalSchema>;
+
+/**
  * The subset of a finding the LLM produces. Kept strict-structured-output
  * friendly for OpenAI: every field is required, with no optionals, defaults,
  * or value constraints (those keywords are unsupported in strict mode). The

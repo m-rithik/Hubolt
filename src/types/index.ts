@@ -1,4 +1,6 @@
 export {
+  AnalyzerSignalSchema,
+  CONTEXT_ADJACENT_TAG,
   FindingCategorySchema,
   FindingSchema,
   LLMFindingSchema,
@@ -19,6 +21,8 @@ export type {
   ReviewContext
 } from "./review-context.js";
 export type {
+  AnalyzerContext,
+  AnalyzerFile,
   AnalyzerProvider,
   AnalyzerSignal,
   LLMProvider,

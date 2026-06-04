@@ -59,6 +59,19 @@ export function isGitRepository(cwd: string = process.cwd()): boolean {
   }
 }
 
+export function getGitRoot(cwd: string = process.cwd()): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`git root lookup failed: ${detail}`);
+  }
+}
+
 export function getChangedFiles(options: ChangedFilesOptions = {}): ChangedFile[] {
   const cwd = options.cwd ?? process.cwd();
   const args = ["diff", "--name-status"];
