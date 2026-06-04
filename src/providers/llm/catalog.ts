@@ -5,13 +5,17 @@ export interface ProviderInfo {
   defaultModel: string;
 }
 
+export const DEFAULT_LLM_PROVIDER_ID = "openai";
+export const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+export const DEFAULT_LLM_MODEL = DEFAULT_OPENAI_MODEL;
+
 /**
  * Single source of truth for selectable LLM providers: their display label,
  * the environment variable holding their API key, and a sensible default model.
  * Used by interactive setup and by `config validate`'s credential check.
  */
 export const PROVIDERS: ProviderInfo[] = [
-  { id: "openai", label: "OpenAI", apiKeyEnv: "OPENAI_API_KEY", defaultModel: "gpt-4.1-mini" },
+  { id: DEFAULT_LLM_PROVIDER_ID, label: "OpenAI", apiKeyEnv: "OPENAI_API_KEY", defaultModel: DEFAULT_OPENAI_MODEL },
   {
     id: "claude",
     label: "Claude (Anthropic)",

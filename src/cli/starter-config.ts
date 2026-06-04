@@ -1,3 +1,5 @@
+import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER_ID } from "../providers/llm/catalog.js";
+
 export function renderStarterConfig(): string {
   return [
     "mode: balanced",
@@ -8,8 +10,8 @@ export function renderStarterConfig(): string {
     "maxContextTokens: 60000",
     "",
     "providers:",
-    "  llm: openai",
-    "  model: gpt-4.1-mini",
+    `  llm: ${DEFAULT_LLM_PROVIDER_ID}`,
+    `  model: ${DEFAULT_LLM_MODEL}`,
     "",
     "privacy:",
     "  redactSecrets: true",

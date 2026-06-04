@@ -15,15 +15,19 @@ export const FindingCategorySchema = z.enum([
 ]);
 export type FindingCategory = z.infer<typeof FindingCategorySchema>;
 
-export const ReviewRangeSchema = z.object({
-  file: z.string().min(1),
-  startLine: z.number().int().positive(),
-  endLine: z.number().int().positive(),
-  startColumn: z.number().int().positive().optional(),
-  endColumn: z.number().int().positive().optional(),
-  diffSide: z.enum(["left", "right"]).default("right"),
-  githubPosition: z.number().int().positive().optional()
-});
+export const ReviewRangeSchema = z
+  .object({
+    file: z.string().min(1),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    startColumn: z.number().int().positive().optional(),
+    endColumn: z.number().int().positive().optional(),
+    diffSide: z.enum(["left", "right"]).default("right"),
+    githubPosition: z.number().int().positive().optional()
+  })
+  .refine((range) => range.endLine >= range.startLine, {
+    message: "endLine must be greater than or equal to startLine"
+  });
 export type ReviewRange = z.infer<typeof ReviewRangeSchema>;
 
 export const FindingSchema = z.object({
@@ -46,6 +50,9 @@ export const FindingSchema = z.object({
   tags: z.array(z.string()).default([])
 });
 export type Finding = z.infer<typeof FindingSchema>;
+
+/** Tag applied to findings whose range falls outside the changed line ranges. */
+export const CONTEXT_ADJACENT_TAG = "context-adjacent";
 
 /**
  * The subset of a finding the LLM produces. Kept strict-structured-output

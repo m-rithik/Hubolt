@@ -7,7 +7,7 @@ import { isGitRepository } from "../../core/git.js";
 import { runReviewPipeline, type ReviewResult } from "../../core/pipeline.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import { createReviewEvent } from "../../types/events.js";
-import type { Finding } from "../../types/finding.js";
+import { CONTEXT_ADJACENT_TAG, type Finding } from "../../types/finding.js";
 import { runSafelyAsync } from "../errors.js";
 import { startSpinner } from "../spinner.js";
 import { ui } from "../ui.js";
@@ -179,7 +179,8 @@ function printResult(result: ReviewResult): void {
     );
     console.log("");
     result.findings.forEach((finding, index) => {
-      console.log(`${index + 1}. ${colorSeverity(finding.severity)} ${finding.title}`);
+      const adjacent = finding.tags.includes(CONTEXT_ADJACENT_TAG) ? ui.muted(" (adjacent to changed lines)") : "";
+      console.log(`${index + 1}. ${colorSeverity(finding.severity)} ${finding.title}${adjacent}`);
       console.log(ui.muted(`   ${finding.ruleId}`));
       console.log(ui.muted(`   Impact: ${finding.impact}`));
       if (finding.suggestion) {
@@ -191,6 +192,9 @@ function printResult(result: ReviewResult): void {
   }
 
   const notes: string[] = [];
+  if (result.droppedInvalid > 0) {
+    notes.push(`${result.droppedInvalid} finding(s) dropped (invalid range or missing evidence)`);
+  }
   if (result.droppedOutOfScope > 0) {
     notes.push(`${result.droppedOutOfScope} finding(s) dropped (outside changed files)`);
   }

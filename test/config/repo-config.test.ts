@@ -1,10 +1,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { loadRepoConfig } from "../../src/config/repo-config.js";
 
 describe("repo config", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("uses defaults when .hubolt.yml is missing", () => {
     const dir = mkdtempSync(join(tmpdir(), "hubolt-config-"));
     try {
@@ -51,6 +55,21 @@ describe("repo config", () => {
       writeFileSync(join(dir, ".hubolt.yml"), "mode: loud\n");
 
       expect(() => loadRepoConfig({ cwd: dir })).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("warns about unknown top-level keys without failing valid config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hubolt-config-"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      writeFileSync(join(dir, ".hubolt.yml"), ["mode: quiet", "severityThreshhold: high", ""].join("\n"));
+
+      const loaded = loadRepoConfig({ cwd: dir });
+
+      expect(loaded.config.mode).toBe("quiet");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("severityThreshhold"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

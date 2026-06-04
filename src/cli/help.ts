@@ -22,7 +22,7 @@ export function renderHome(): string {
       ["hubolt logs inspect", "summarize the local event log"]
     ]),
     "",
-    ui.muted("Run hubolt --help for the full command list. The analysis engine is not implemented yet.")
+    ui.muted("Run hubolt --help for the full command list.")
   ].join("\n");
 }
 

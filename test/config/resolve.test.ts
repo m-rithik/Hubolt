@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { resolveSettings } from "../../src/config/resolve.js";
+import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER_ID } from "../../src/providers/llm/catalog.js";
 
 let dir: string;
 
@@ -19,8 +20,8 @@ describe("resolveSettings precedence", () => {
     const settings = resolveSettings({ cwd: dir, env: {} });
 
     expect(settings.configPath).toBeNull();
-    expect(settings.llmProvider).toBe("openai");
-    expect(settings.llmModel).toBe("gpt-4.1-mini");
+    expect(settings.llmProvider).toBe(DEFAULT_LLM_PROVIDER_ID);
+    expect(settings.llmModel).toBe(DEFAULT_LLM_MODEL);
   });
 
   test(".hubolt.yml overrides defaults", () => {

@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER_ID } from "../providers/llm/catalog.js";
 import { SeveritySchema } from "../types/finding.js";
 
 export const ReviewModeSchema = z.enum(["quiet", "balanced", "strict", "security"]);
 
-export const RepoConfigSchema = z.object({
+const RepoConfigShape = {
   mode: ReviewModeSchema.default("balanced"),
   severityThreshold: SeveritySchema.default("medium"),
   failOnSeverity: SeveritySchema.default("critical"),
@@ -12,8 +13,8 @@ export const RepoConfigSchema = z.object({
   maxContextTokens: z.number().int().positive().default(60000),
   providers: z
     .object({
-      llm: z.string().min(1).default("openai"),
-      model: z.string().min(1).default("gpt-4.1-mini")
+      llm: z.string().min(1).default(DEFAULT_LLM_PROVIDER_ID),
+      model: z.string().min(1).default(DEFAULT_LLM_MODEL)
     })
     .default({}),
   privacy: z
@@ -47,6 +48,10 @@ export const RepoConfigSchema = z.object({
   ignore: z.array(z.string()).default([]),
   knowledgeFiles: z.array(z.string()).default([]),
   rules: z.array(z.string()).default([])
-});
+};
+
+export const REPO_CONFIG_TOP_LEVEL_KEYS = Object.freeze(Object.keys(RepoConfigShape));
+
+export const RepoConfigSchema = z.object(RepoConfigShape);
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
