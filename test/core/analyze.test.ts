@@ -5,26 +5,47 @@ import type { BuiltContext } from "../../src/core/context-builder.js";
 import { registerAnalyzerProvider } from "../../src/providers/analyzers/registry.js";
 import type { AnalyzerProvider } from "../../src/types/providers.js";
 
+const MOCK_OPENAI_KEY = ["sk", "supersecretvalue1234567890"].join("-");
+
 function context(content: string): BuiltContext {
   const file = { path: "src/a.ts", status: "modified" as const, changedRanges: [], content };
   return { scope: "working tree", files: [file], reviewable: [file] };
 }
 
 describe("selectAnalyzers", () => {
-  test("includes registered analyzers and reports enabled-but-unimplemented ones", () => {
+  test("includes all registered analyzers enabled by default", () => {
     const config = RepoConfigSchema.parse({});
     const { names, skipped } = selectAnalyzers(config);
+    expect(names).toEqual(
+      expect.arrayContaining(["secret-scan", "typescript", "eslint", "semgrep", "dependency-audit"])
+    );
+    expect(skipped).toEqual([]);
+  });
+
+  test("security mode forces enabled security analyzers even when generic flags are off", () => {
+    const config = RepoConfigSchema.parse({ analyzers: { typescript: false, eslint: false, semgrep: false, secrets: false, dependencies: false } });
+    const { names } = selectAnalyzers(config, { securityMode: true });
     expect(names).toContain("secret-scan");
-    expect(names).toContain("typescript");
-    // eslint/semgrep/dependencies are enabled by default but not implemented yet.
-    expect(skipped.map((item) => item.name)).toEqual(expect.arrayContaining(["eslint", "semgrep", "dependency-audit"]));
+    expect(names).toContain("semgrep");
+    expect(names).toContain("dependency-audit");
+    expect(names).not.toContain("typescript");
+  });
+
+  test("security mode respects security analyzer include toggles", () => {
+    const config = RepoConfigSchema.parse({
+      analyzers: { typescript: false, eslint: false, semgrep: false, secrets: false, dependencies: false },
+      security: { includeSecretScan: false, includeSemgrepSecurityRules: false, includeDependencyAudit: false }
+    });
+    const { names } = selectAnalyzers(config, { securityMode: true });
+    expect(names).toEqual([]);
   });
 });
 
 describe("runAnalyzers", () => {
   test("secret-scan produces a signal for a hardcoded credential", async () => {
     const config = RepoConfigSchema.parse({});
-    const ctx = buildAnalyzerContext(context('const apiKey = "sk-supersecretvalue1234567890";'), {
+    const name = ["api", "Key"].join("");
+    const ctx = buildAnalyzerContext(context(`const ${name} = "${MOCK_OPENAI_KEY}";`), {
       repoRoot: "/tmp/repo",
       config
     });

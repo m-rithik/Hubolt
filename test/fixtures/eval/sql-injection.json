@@ -1,0 +1,14 @@
+{
+  "name": "sql-injection",
+  "description": "User-controlled id concatenated directly into a SQL query.",
+  "category": "security",
+  "files": [
+    {
+      "path": "src/users.ts",
+      "content": "export function getUser(db, id) {\n  const query = \"SELECT * FROM users WHERE id = '\" + id + \"'\";\n  return db.query(query);\n}\n"
+    }
+  ],
+  "expected": [
+    { "file": "src/users.ts", "startLine": 2, "endLine": 2, "category": "security" }
+  ]
+}

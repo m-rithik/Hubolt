@@ -1,0 +1,14 @@
+{
+  "name": "unbounded-query",
+  "description": "Database read returns all rows with no pagination or limit.",
+  "category": "performance",
+  "files": [
+    {
+      "path": "src/list.ts",
+      "content": "export async function listAll(User) {\n  return await User.find();\n}\n"
+    }
+  ],
+  "expected": [
+    { "file": "src/list.ts", "startLine": 2, "endLine": 2, "category": "performance" }
+  ]
+}

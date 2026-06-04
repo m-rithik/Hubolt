@@ -1,0 +1,13 @@
+{
+  "name": "safe-parameterized-query",
+  "description": "Parameterized query that is safe; a reviewer should not flag it (false-positive trap).",
+  "category": "false-positive",
+  "files": [
+    {
+      "path": "src/safe.ts",
+      "content": "export function getUser(db, id) {\n  return db.query(\"SELECT * FROM users WHERE id = ?\", [id]);\n}\n"
+    }
+  ],
+  "expected": [],
+  "expectedNonFindings": [{ "file": "src/safe.ts", "startLine": 2, "endLine": 2 }]
+}

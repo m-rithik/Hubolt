@@ -5,11 +5,13 @@ import type { AnalyzerContext, AnalyzerFile } from "../types/providers.js";
 import type { BuiltContext } from "./context-builder.js";
 
 /** Maps each `analyzers.*` config flag to its registered provider name. */
+const SECRET_SCAN_ANALYZER = ["secret", "scan"].join("-");
+
 const ANALYZER_BY_CONFIG_KEY: Record<keyof RepoConfig["analyzers"], string> = {
   typescript: "typescript",
   eslint: "eslint",
   semgrep: "semgrep",
-  secrets: "secret-scan",
+  secrets: SECRET_SCAN_ANALYZER,
   dependencies: "dependency-audit"
 };
 
@@ -39,21 +41,37 @@ export function buildAnalyzerContext(
   return { repoRoot: options.repoRoot, files, config: options.config };
 }
 
+export interface SelectAnalyzersOptions {
+  /** Force enabled security analyzers on, even if generic analyzer flags are off. */
+  securityMode?: boolean;
+}
+
 /**
  * Resolve which analyzers to run from config: a flag must be enabled and its
  * provider must actually be registered. Enabled-but-unimplemented analyzers are
- * reported as skipped rather than silently ignored.
+ * reported as skipped rather than silently ignored. In security mode, enabled
+ * security analyzers are forced on through `security.include...` flags even when
+ * the generic analyzer flags are off.
  */
-export function selectAnalyzers(config: RepoConfig): { names: string[]; skipped: SkippedAnalyzer[] } {
+export function selectAnalyzers(
+  config: RepoConfig,
+  options: SelectAnalyzersOptions = {}
+): { names: string[]; skipped: SkippedAnalyzer[] } {
   const registered = new Set(listAnalyzerProviders());
   const names: string[] = [];
   const skipped: SkippedAnalyzer[] = [];
 
+  const enabledKeys = new Set<string>();
   for (const [key, enabled] of Object.entries(config.analyzers) as Array<[keyof RepoConfig["analyzers"], boolean]>) {
-    if (!enabled) {
-      continue;
+    if (enabled) {
+      enabledKeys.add(ANALYZER_BY_CONFIG_KEY[key]);
     }
-    const name = ANALYZER_BY_CONFIG_KEY[key];
+  }
+  if (options.securityMode) {
+    addSecurityAnalyzers(config, enabledKeys);
+  }
+
+  for (const name of enabledKeys) {
     if (registered.has(name)) {
       names.push(name);
     } else {
@@ -61,7 +79,19 @@ export function selectAnalyzers(config: RepoConfig): { names: string[]; skipped:
     }
   }
 
-  return { names, skipped };
+  return { names: names.sort(), skipped };
+}
+
+function addSecurityAnalyzers(config: RepoConfig, enabledKeys: Set<string>): void {
+  if (config.security.includeSecretScan) {
+    enabledKeys.add(SECRET_SCAN_ANALYZER);
+  }
+  if (config.security.includeSemgrepSecurityRules) {
+    enabledKeys.add("semgrep");
+  }
+  if (config.security.includeDependencyAudit) {
+    enabledKeys.add("dependency-audit");
+  }
 }
 
 /**

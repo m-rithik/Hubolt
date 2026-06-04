@@ -44,6 +44,7 @@ const PEM_BEGIN_REST = /(-----BEGIN [A-Z ]*PRIVATE KEY-----)(.*)$/;
 const PEM_END_PREFIX = /^(.*?)(-----END [A-Z ]*PRIVATE KEY-----)/;
 const ENV_VAR_NAME = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
 const ENV_REFERENCE_FIELD = /(?:env|environment|envvar|variable)$/i;
+const REDACTION_METADATA_VALUE = /^(?:\$\{redacted\.count\}|\d+)$/;
 
 /**
  * Redact secrets from source text before it is sent to a model.
@@ -98,7 +99,7 @@ export function redactSecrets(text: string, options: RedactionOptions = {}): Red
 
     let redacted = line.replace(ASSIGNMENT, (match, name, op, singleValue, doubleValue, backtickValue) => {
       const value = String(singleValue ?? doubleValue ?? backtickValue ?? "");
-      if (isEnvVarReference(name, value)) {
+      if (isRedactionMetadata(name, value) || isEnvVarReference(name, value)) {
         return match;
       }
 
@@ -122,6 +123,10 @@ export function redactSecrets(text: string, options: RedactionOptions = {}): Red
 
 function isEnvVarReference(name: string, value: string): boolean {
   return ENV_REFERENCE_FIELD.test(name) && ENV_VAR_NAME.test(value);
+}
+
+function isRedactionMetadata(name: string, value: string): boolean {
+  return name === "redactedSecrets" && REDACTION_METADATA_VALUE.test(value);
 }
 
 function redactPemBeginLine(line: string, placeholder: string): RedactionResult {
@@ -206,7 +211,7 @@ export function scanSecrets(text: string): SecretMatch[] {
     for (const assignment of line.matchAll(ASSIGNMENT)) {
       const name = String(assignment[1]);
       const value = String(assignment[3] ?? assignment[4] ?? assignment[5] ?? "");
-      if (isEnvVarReference(name, value)) {
+      if (isRedactionMetadata(name, value) || isEnvVarReference(name, value)) {
         continue;
       }
       matches.push({

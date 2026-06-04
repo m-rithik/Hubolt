@@ -1,13 +1,16 @@
 import type { Command } from "commander";
+import type { RepoConfig } from "../../config/schema.js";
 import { resolveSettings, type ResolvedSettings } from "../../config/resolve.js";
+import { buildAnalyzerContext, runAnalyzers, selectAnalyzers } from "../../core/analyze.js";
 import { buildContext, type BuiltContext, type ReviewFile } from "../../core/context-builder.js";
 import { createJsonlEventLog, defaultEventLogPath } from "../../core/event-log.js";
 import { InProcessReviewEventEmitter } from "../../core/events.js";
-import { isGitRepository } from "../../core/git.js";
+import { getGitRoot, isGitRepository } from "../../core/git.js";
 import { runReviewPipeline, type ReviewResult } from "../../core/pipeline.js";
+import { severityRank } from "../../core/rank.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import { createReviewEvent } from "../../types/events.js";
-import { CONTEXT_ADJACENT_TAG, type Finding } from "../../types/finding.js";
+import { CONTEXT_ADJACENT_TAG, SeveritySchema, type AnalyzerSignal, type Finding, type Severity } from "../../types/finding.js";
 import { runSafelyAsync } from "../errors.js";
 import { startSpinner } from "../spinner.js";
 import { ui } from "../ui.js";
@@ -20,6 +23,13 @@ interface ReviewOptions {
   showContext?: boolean;
   provider?: string;
   model?: string;
+  security?: boolean;
+  failOn?: string;
+}
+
+interface RunOptions {
+  /** Set process exit code when a finding reaches the fail-on severity (CI gate). */
+  failOnExit?: boolean;
 }
 
 export function registerReviewCommand(program: Command): void {
@@ -32,13 +42,30 @@ export function registerReviewCommand(program: Command): void {
     .option("--show-context", "print the context that would be sent to the model; no model call")
     .option("--provider <name>", "override the LLM provider for this run (openai, claude, google)")
     .option("--model <model>", "override the LLM model for this run")
+    .option("--security", "run a security-scoped review (security categories only)")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: ReviewOptions) => {
       void runSafelyAsync(() => runReview(options));
     });
 }
 
-async function runReview(options: ReviewOptions): Promise<void> {
+export function registerSecurityCommand(program: Command): void {
+  program
+    .command("security")
+    .description("Run a security-scoped review and fail when findings reach a severity threshold.")
+    .option("--staged", "review staged changes instead of the working tree")
+    .option("--base <ref>", "base ref for a commit-range review (requires --head)")
+    .option("--head <ref>", "head ref for a commit-range review (requires --base)")
+    .option("--fail-on <severity>", "exit non-zero when a finding reaches this severity (info|low|medium|high|critical)")
+    .option("--provider <name>", "override the LLM provider for this run (openai, claude, google)")
+    .option("--model <model>", "override the LLM model for this run")
+    .option("-c, --config <path>", "path to a Hubolt config file")
+    .action((options: ReviewOptions) => {
+      void runSafelyAsync(() => runReview({ ...options, security: true }, { failOnExit: true }));
+    });
+}
+
+async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): Promise<void> {
   if (Boolean(options.base) !== Boolean(options.head)) {
     throw new Error("Provide both --base and --head to review a commit range.");
   }
@@ -47,10 +74,20 @@ async function runReview(options: ReviewOptions): Promise<void> {
     throw new Error("Not a git repository. Run Hubolt inside a git working tree.");
   }
 
-  const settings = resolveSettings({ configPath: options.config });
+  const repo = getGitRoot();
+  const baseSettings = resolveSettings({ cwd: options.config ? process.cwd() : repo, configPath: options.config });
+
+  // Security mode comes from --security/the security command, config mode, or
+  // the explicit security.enabled toggle.
+  const securityMode = Boolean(options.security) || baseSettings.repo.mode === "security" || baseSettings.repo.security.enabled;
+  const repoConfig: RepoConfig = securityMode ? { ...baseSettings.repo, mode: "security" } : baseSettings.repo;
+  const settings: ResolvedSettings = { ...baseSettings, mode: repoConfig.mode, repo: repoConfig };
+
+  const failOn = parseFailOn(options.failOn) ?? settings.repo.security.failOnSeverity;
   const providerName = options.provider ?? settings.llmProvider;
   const modelName = options.model ?? settings.llmModel;
   const context = await buildContext({
+    cwd: repo,
     staged: options.staged,
     base: options.base,
     head: options.head,
@@ -62,7 +99,6 @@ async function runReview(options: ReviewOptions): Promise<void> {
     return;
   }
 
-  const repo = process.cwd();
   const emitter = new InProcessReviewEventEmitter();
   const log = createJsonlEventLog(defaultEventLogPath(repo));
   emitter.on("*", (event) => log.append(event));
@@ -91,11 +127,13 @@ async function runReview(options: ReviewOptions): Promise<void> {
     return;
   }
 
+  const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode);
+
   const llm = getLLMProvider(providerName, { model: modelName });
   const spinner = startSpinner(`Reviewing ${context.reviewable.length} file(s) with ${providerName}...`);
   let result;
   try {
-    result = await runReviewPipeline({ context, config: settings.repo, llm });
+    result = await runReviewPipeline({ context, config: settings.repo, llm, analyzerSignals });
   } catch (error) {
     spinner.stop();
     await emitter.emit(
@@ -136,6 +174,75 @@ async function runReview(options: ReviewOptions): Promise<void> {
   );
 
   printResult(result);
+
+  if (runOptions.failOnExit) {
+    applyFailOnGate(result, failOn);
+  }
+}
+
+/**
+ * Set the process exit code (CI gate) when any finding reaches the fail-on
+ * severity. Prints a clear pass/fail line either way.
+ */
+function applyFailOnGate(result: ReviewResult, failOn: Severity): void {
+  const threshold = severityRank(failOn);
+  const breaching = result.findings.filter((finding) => severityRank(finding.severity) >= threshold);
+
+  console.log("");
+  if (breaching.length > 0) {
+    process.exitCode = 1;
+    console.log(ui.error(`Security gate failed: ${breaching.length} finding(s) at or above "${failOn}".`));
+  } else {
+    console.log(ui.success(`Security gate passed: no findings at or above "${failOn}".`));
+  }
+}
+
+function parseFailOn(value: string | undefined): Severity | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = SeveritySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`Invalid --fail-on severity: ${value}. Use info, low, medium, high, or critical.`);
+  }
+  return parsed.data;
+}
+
+/**
+ * Run the configured analyzers over the changed files and return their signals.
+ * Failures are isolated by runAnalyzers, so this never throws the review; it
+ * prints a one-line summary and emits an analyzer.completed event.
+ */
+async function collectAnalyzerSignals(
+  context: BuiltContext,
+  settings: ResolvedSettings,
+  emitter: InProcessReviewEventEmitter,
+  repo: string,
+  securityMode: boolean
+): Promise<AnalyzerSignal[]> {
+  const { names } = selectAnalyzers(settings.repo, { securityMode });
+  if (names.length === 0) {
+    return [];
+  }
+
+  const analyzerContext = buildAnalyzerContext(context, { repoRoot: repo, config: settings.repo });
+  const { signals, ran } = await runAnalyzers(analyzerContext, names);
+
+  await emitter.emit(
+    createReviewEvent({
+      type: "analyzer.completed",
+      repo,
+      payload: { ran, signals: signals.length },
+      redactionState: "metadataOnly"
+    })
+  );
+
+  if (ran.length > 0) {
+    console.log("");
+    console.log(ui.muted(`Analyzers: ${ran.join(", ")} (${signals.length} signal${signals.length === 1 ? "" : "s"})`));
+  }
+
+  return signals;
 }
 
 function printHeader(
@@ -144,8 +251,9 @@ function printHeader(
   provider: string,
   model: string
 ): void {
+  const title = settings.mode === "security" ? "Hubolt Security Review" : "Hubolt Review";
   console.log(
-    ui.section("Hubolt Review", [
+    ui.section(title, [
       ["Scope", context.scope],
       ["Config", settings.configPath ?? "built-in defaults"],
       ["Mode", settings.mode],
@@ -181,7 +289,8 @@ function printResult(result: ReviewResult): void {
     result.findings.forEach((finding, index) => {
       const adjacent = finding.tags.includes(CONTEXT_ADJACENT_TAG) ? ui.muted(" (adjacent to changed lines)") : "";
       console.log(`${index + 1}. ${colorSeverity(finding.severity)} ${finding.title}${adjacent}`);
-      console.log(ui.muted(`   ${finding.ruleId}`));
+      const source = finding.source === "llm" ? "" : ` [${finding.source}]`;
+      console.log(ui.muted(`   ${finding.ruleId}${source}`));
       console.log(ui.muted(`   Impact: ${finding.impact}`));
       if (finding.suggestion) {
         console.log(ui.muted(`   Fix:    ${finding.suggestion}`));
@@ -200,6 +309,12 @@ function printResult(result: ReviewResult): void {
   }
   if (result.belowThreshold > 0) {
     notes.push(`${result.belowThreshold} finding(s) below threshold`);
+  }
+  if (result.promotedFromAnalyzers > 0) {
+    notes.push(`${result.promotedFromAnalyzers} analyzer signal(s) promoted to findings`);
+  }
+  if (result.droppedByMode > 0) {
+    notes.push(`${result.droppedByMode} non-security finding(s) hidden by security mode`);
   }
   if (notes.length > 0) {
     console.log(ui.muted(notes.join("; ")));

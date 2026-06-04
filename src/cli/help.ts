@@ -19,6 +19,7 @@ export function renderHome(): string {
       ["hubolt review", "review working-tree changes with the LLM"],
       ["hubolt review --staged", "review staged changes"],
       ["hubolt analyze", "run static analyzers only, no LLM call"],
+      ["hubolt security --fail-on high", "security-scoped review with a CI gate"],
       ["hubolt logs tail", "show recent review events"],
       ["hubolt logs inspect", "summarize the local event log"]
     ]),

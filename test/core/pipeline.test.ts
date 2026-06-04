@@ -18,6 +18,7 @@ function llmFinding(overrides: Partial<LLMFinding> = {}): LLMFinding {
     impact: "impact",
     suggestion: "",
     verification: "verification",
+    relatedSignals: [],
     ...overrides
   };
 }
@@ -113,5 +114,65 @@ describe("runReviewPipeline", () => {
     expect(outside?.tags).toContain(CONTEXT_ADJACENT_TAG);
     // Directly-changed findings rank above context-adjacent ones at equal severity.
     expect(result.findings[0].ruleId).toBe("x.inside");
+  });
+});
+
+describe("runReviewPipeline analyzer signals", () => {
+  const signal = {
+    id: "secret-scan:secret.hardcoded-credential:src/a.ts:5",
+    analyzer: "secret-scan",
+    ruleId: "secret.hardcoded-credential",
+    range: { file: "src/a.ts", startLine: 5, endLine: 5, diffSide: "right" as const },
+    severity: "high" as const,
+    message: "Possible hardcoded secret.",
+    evidence: ["Detected at src/a.ts:5"]
+  };
+
+  test("promotes an untriaged signal to an analyzer-sourced finding", async () => {
+    const config = RepoConfigSchema.parse({ severityThreshold: "low" });
+    const llm = fakeProvider([]);
+
+    const result = await runReviewPipeline({ context, config, llm, analyzerSignals: [signal] });
+
+    expect(result.analyzerSignals).toBe(1);
+    expect(result.promotedFromAnalyzers).toBe(1);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].source).toBe("analyzer");
+    expect(result.findings[0].relatedSignals).toEqual([signal.id]);
+  });
+
+  test("does not promote a signal the LLM already triaged via relatedSignals", async () => {
+    const config = RepoConfigSchema.parse({ severityThreshold: "low" });
+    const llm = fakeProvider([
+      llmFinding({
+        ruleId: "security.hardcoded-secret",
+        category: "security",
+        range: { file: "src/a.ts", startLine: 5, endLine: 5 },
+        relatedSignals: [signal.id]
+      })
+    ]);
+
+    const result = await runReviewPipeline({ context, config, llm, analyzerSignals: [signal] });
+
+    expect(result.analyzerSignals).toBe(1);
+    expect(result.promotedFromAnalyzers).toBe(0);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].source).toBe("llm");
+  });
+});
+
+describe("runReviewPipeline security mode", () => {
+  test("keeps only security-category findings and counts the rest as mode-dropped", async () => {
+    const config = RepoConfigSchema.parse({ mode: "security", severityThreshold: "low" });
+    const llm = fakeProvider([
+      llmFinding({ ruleId: "security.injection", category: "security" }),
+      llmFinding({ ruleId: "quality.naming", category: "quality", range: { file: "src/a.ts", startLine: 11, endLine: 11 } })
+    ]);
+
+    const result = await runReviewPipeline({ context, config, llm });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].category).toBe("security");
+    expect(result.droppedByMode).toBe(1);
   });
 });

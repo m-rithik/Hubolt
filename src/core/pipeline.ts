@@ -5,7 +5,9 @@ import {
   CONTEXT_ADJACENT_TAG,
   FindingSchema,
   LLMFindingSchema,
+  type AnalyzerSignal,
   type Finding,
+  type FindingCategory,
   type LLMFinding
 } from "../types/finding.js";
 import type { LLMProvider } from "../types/providers.js";
@@ -19,12 +21,19 @@ export interface ReviewResult {
   droppedInvalid: number;
   droppedOutOfScope: number;
   belowThreshold: number;
+  droppedByMode: number;
+  analyzerSignals: number;
+  promotedFromAnalyzers: number;
 }
+
+/** Finding categories kept when running in security mode. */
+const SECURITY_CATEGORIES = new Set<FindingCategory>(["security"]);
 
 export interface RunPipelineParams {
   context: BuiltContext;
   config: RepoConfig;
   llm: LLMProvider;
+  analyzerSignals?: AnalyzerSignal[];
 }
 
 /**
@@ -33,8 +42,9 @@ export interface RunPipelineParams {
  */
 export async function runReviewPipeline(params: RunPipelineParams): Promise<ReviewResult> {
   const { context, config, llm } = params;
+  const analyzerSignals = params.analyzerSignals ?? [];
 
-  const prompt = buildReviewPrompt(context, config);
+  const prompt = buildReviewPrompt(context, config, analyzerSignals);
   const raw = await llm.review({ system: prompt.system, user: prompt.user });
 
   // The LLM schema is intentionally loose for strict structured output, so each
@@ -45,7 +55,7 @@ export async function runReviewPipeline(params: RunPipelineParams): Promise<Revi
   );
 
   let droppedInvalid = 0;
-  const enriched: Finding[] = [];
+  const llmFindings: Finding[] = [];
   for (const candidate of raw) {
     const llmParsed = LLMFindingSchema.safeParse(candidate);
     if (!llmParsed.success) {
@@ -58,20 +68,48 @@ export async function runReviewPipeline(params: RunPipelineParams): Promise<Revi
       droppedInvalid += 1;
       continue;
     }
-    enriched.push(tagScope(parsed.data, rangesByPath));
+    llmFindings.push(parsed.data);
   }
+
+  // Promote analyzer signals the LLM did not already triage. A signal is
+  // "claimed" when an LLM finding lists its id in relatedSignals; the model's
+  // explanation supersedes raw promotion there. Unclaimed deterministic signals
+  // still surface so nothing is silently lost.
+  const claimed = new Set<string>();
+  for (const finding of llmFindings) {
+    for (const id of finding.relatedSignals) {
+      claimed.add(id);
+    }
+  }
+  const promoted: Finding[] = [];
+  for (const signal of analyzerSignals) {
+    if (!claimed.has(signal.id)) {
+      promoted.push(promoteSignal(signal));
+    }
+  }
+
+  const enriched = [...llmFindings, ...promoted].map((finding) => tagScope(finding, rangesByPath));
 
   const reviewablePaths = new Set(context.reviewable.map((file) => file.path));
   const inScope = enriched.filter((finding) => reviewablePaths.has(finding.range.file));
   const passing = filterByThreshold(inScope, config.severityThreshold);
-  const ranked = rankFindings(dedupeFindings(passing));
+
+  // In security mode only security-relevant findings are in scope; everything
+  // else is dropped here (it would move to a summary once reports land).
+  const inMode =
+    config.mode === "security" ? passing.filter((finding) => SECURITY_CATEGORIES.has(finding.category)) : passing;
+
+  const ranked = rankFindings(dedupeFindings(inMode));
 
   return {
     findings: ranked,
     rawCount: raw.length,
     droppedInvalid,
     droppedOutOfScope: enriched.length - inScope.length,
-    belowThreshold: inScope.length - passing.length
+    belowThreshold: inScope.length - passing.length,
+    droppedByMode: passing.length - inMode.length,
+    analyzerSignals: analyzerSignals.length,
+    promotedFromAnalyzers: promoted.length
   };
 }
 
@@ -118,7 +156,7 @@ export function toFinding(finding: LLMFinding): Finding {
     impact: finding.impact,
     suggestion: suggestion.length > 0 ? suggestion : undefined,
     verification: finding.verification,
-    relatedSignals: [],
+    relatedSignals: finding.relatedSignals,
     tags: []
   };
 }
@@ -133,4 +171,59 @@ function fingerprint(finding: LLMFinding): string {
   ].join("|");
 
   return `fp_${createHash("sha1").update(basis).digest("hex").slice(0, 16)}`;
+}
+
+/** Category assigned to a promoted analyzer finding, keyed by analyzer name. */
+const ANALYZER_CATEGORY: Record<string, FindingCategory> = {
+  "secret-scan": "security",
+  semgrep: "security",
+  "dependency-audit": "security",
+  typescript: "quality",
+  eslint: "bestPractice"
+};
+
+/** Verification hint for a promoted analyzer finding, keyed by analyzer name. */
+const ANALYZER_VERIFICATION: Record<string, string> = {
+  "secret-scan": "Confirm the value is a real secret, rotate it, and move it to an environment variable.",
+  typescript: "Run tsc to reproduce the diagnostic, then fix the type error.",
+  eslint: "Run ESLint to reproduce the rule violation.",
+  semgrep: "Run Semgrep to reproduce the rule match and confirm it applies to changed code.",
+  "dependency-audit": "Re-run the dependency audit and review the affected package."
+};
+
+/**
+ * Convert a deterministic analyzer signal into a finding. Used only for signals
+ * the LLM did not triage, so they are not silently lost. Analyzer findings carry
+ * high confidence and link back to the originating signal id.
+ */
+export function promoteSignal(signal: AnalyzerSignal): Finding {
+  const evidence = signal.evidence.length > 0 ? signal.evidence : [`${signal.analyzer}: ${signal.ruleId}`];
+
+  return {
+    fingerprint: `fp_${createHash("sha1").update(signal.id).digest("hex").slice(0, 16)}`,
+    ruleId: signal.ruleId,
+    title: truncateTitle(signal.message),
+    message: signal.message,
+    category: ANALYZER_CATEGORY[signal.analyzer] ?? "quality",
+    severity: signal.severity,
+    confidenceLabel: "high",
+    source: "analyzer",
+    range: {
+      file: signal.range.file,
+      startLine: signal.range.startLine,
+      endLine: signal.range.endLine,
+      diffSide: signal.range.diffSide ?? "right"
+    },
+    evidence,
+    impact: signal.message,
+    suggestion: undefined,
+    verification: ANALYZER_VERIFICATION[signal.analyzer] ?? "Re-run the analyzer to confirm.",
+    relatedSignals: [signal.id],
+    tags: ["analyzer"]
+  };
+}
+
+function truncateTitle(message: string): string {
+  const single = message.replace(/\s+/g, " ").trim();
+  return single.length > 80 ? `${single.slice(0, 79)}...` : single;
 }

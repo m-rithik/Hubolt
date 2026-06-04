@@ -34,6 +34,13 @@ describe("buildReviewPrompt", () => {
     expect(system).toContain("not literal source code");
   });
 
+  test("system prompt adds a security focus in security mode", () => {
+    const { system } = buildReviewPrompt(context(), RepoConfigSchema.parse({ mode: "security" }));
+
+    expect(system).toContain("Security mode is active");
+    expect(system).toContain("Omit non-security quality comments");
+  });
+
   test("user prompt fences file content with begin/end markers and changed lines", () => {
     const { user } = buildReviewPrompt(context(), RepoConfigSchema.parse({}));
 
@@ -52,7 +59,27 @@ describe("buildReviewPrompt", () => {
     expect(user).toContain("- Validate request bodies with zod.");
   });
 
+  test("renders analyzer signals for LLM triage", () => {
+    const { system, user } = buildReviewPrompt(context(), RepoConfigSchema.parse({}), [
+      {
+        id: "secret-scan:secret.openai-key:src/api/users.ts:25",
+        analyzer: "secret-scan",
+        ruleId: "secret.openai-key",
+        range: { file: "src/api/users.ts", startLine: 25, endLine: 25, diffSide: "right" },
+        severity: "high",
+        message: "Possible OpenAI API key detected.",
+        evidence: ["Detected at src/api/users.ts:25"]
+      }
+    ]);
+
+    expect(system).toContain("relatedSignals");
+    expect(user).toContain("kind=analyzerSignals");
+    expect(user).toContain("[secret-scan:secret.openai-key:src/api/users.ts:25]");
+    expect(user).toContain("high secret-scan/secret.openai-key src/api/users.ts:25-25");
+  });
+
   test("uses a prompt-specific placeholder for redacted secrets", () => {
+    const key = ["sk", "abcdefghijklmnopqrstuvwxyz123456"].join("-");
     const { user } = buildReviewPrompt(
       context({
         files: [
@@ -60,14 +87,14 @@ describe("buildReviewPrompt", () => {
             path: "test/core/redact.test.ts",
             status: "modified" as const,
             changedRanges: [{ startLine: 1, endLine: 3 }],
-            content: 'const input = "sk-abcdefghijklmnopqrstuvwxyz123456";\nexpect(output).toBe("[REDACTED]");'
+            content: `const input = "${key}";\nexpect(output).toBe("[REDACTED]");`
           }
         ]
       }),
       RepoConfigSchema.parse({})
     );
 
-    expect(user).not.toContain("sk-abcdefghijklmnopqrstuvwxyz123456");
+    expect(user).not.toContain(key);
     expect(user).toContain('"[HUBOLT_REDACTED_SECRET]"');
     expect(user).toContain('expect(output).toBe("[REDACTED]");');
     expect(user).toContain('redactedSecrets="1"');

@@ -97,6 +97,9 @@ export const LLMFindingSchema = z.object({
   evidence: z.array(z.string()),
   impact: z.string(),
   suggestion: z.string(),
-  verification: z.string()
+  verification: z.string(),
+  // Ids of analyzer signals this finding triages; empty when the finding is
+  // LLM-only. Kept required (no default) for OpenAI strict structured output.
+  relatedSignals: z.array(z.string())
 });
 export type LLMFinding = z.infer<typeof LLMFindingSchema>;
