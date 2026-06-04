@@ -39,10 +39,18 @@ export function readEventLog(filePath: string): ReviewEvent[] {
  * keeping payloads metadata-only; this sink does not redact.
  */
 export function createJsonlEventLog(filePath: string): EventLog {
+  let dirCreated = false;
   return {
     append(event: ReviewEvent): void {
-      mkdirSync(dirname(filePath), { recursive: true });
-      appendFileSync(filePath, `${JSON.stringify(event)}\n`);
+      try {
+        if (!dirCreated) {
+          mkdirSync(dirname(filePath), { recursive: true });
+          dirCreated = true;
+        }
+        appendFileSync(filePath, `${JSON.stringify(event)}\n`);
+      } catch {
+        // Log write failures must not crash the review.
+      }
     }
   };
 }

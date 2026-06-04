@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import picomatch from "picomatch";
 import type { RepoConfig } from "../config/schema.js";
 import { parseUnifiedDiff, type ChangedRange } from "./diff.js";
-import { getChangedFiles, getDiffText, type ChangeStatus, type ChangedFilesOptions } from "./git.js";
+import { getChangedFiles, getDiffText, gitFileContent, gitFileSize, type ChangeStatus, type ChangedFilesOptions } from "./git.js";
+import { mapChangedRegions, type SemanticRegion } from "./semantic-map.js";
 
 export type SkipReason = "deleted" | "ignored" | "too-large" | "unreadable";
 
@@ -12,6 +13,7 @@ export interface ReviewFile {
   status: ChangeStatus;
   changedRanges: ChangedRange[];
   content?: string;
+  regions?: SemanticRegion[];
   skipped?: SkipReason;
 }
 
@@ -33,46 +35,84 @@ export function describeScope(options: ChangedFilesOptions): string {
   return options.staged ? "staged changes" : "working tree";
 }
 
-export function buildContext(options: BuildContextOptions): BuiltContext {
+export async function buildContext(options: BuildContextOptions): Promise<BuiltContext> {
   const cwd = options.cwd ?? process.cwd();
   const { config } = options;
 
   const changed = getChangedFiles(options);
+
+  // getDiffText can fail for edge cases such as a tracked file being replaced
+  // with a FIFO or socket in the working tree. Treat failure as no diff ranges
+  // available — files are still reviewed, just without fine-grained line info.
   const rangesByPath = new Map<string, ChangedRange[]>();
-  for (const fileDiff of parseUnifiedDiff(getDiffText(options))) {
-    rangesByPath.set(fileDiff.path, fileDiff.changedRanges);
+  try {
+    for (const fileDiff of parseUnifiedDiff(getDiffText(options))) {
+      rangesByPath.set(fileDiff.path, fileDiff.changedRanges);
+    }
+  } catch {
+    // Degraded mode: review changed files without line-range highlighting.
   }
 
   const isIgnored = config.ignore.length > 0 ? picomatch(config.ignore, { dot: true }) : () => false;
   const maxBytes = config.maxFileSizeKb * 1024;
 
-  const files = changed.map((file): ReviewFile => {
+  const files: ReviewFile[] = [];
+  for (const file of changed) {
     const changedRanges = rangesByPath.get(file.path) ?? [];
 
     if (file.status === "deleted") {
-      return { path: file.path, status: file.status, changedRanges, skipped: "deleted" };
+      files.push({ path: file.path, status: file.status, changedRanges, skipped: "deleted" });
+      continue;
     }
 
     if (isIgnored(file.path)) {
-      return { path: file.path, status: file.status, changedRanges, skipped: "ignored" };
+      files.push({ path: file.path, status: file.status, changedRanges, skipped: "ignored" });
+      continue;
     }
 
     const absolute = resolve(cwd, file.path);
     try {
-      if (statSync(absolute).size > maxBytes) {
-        return { path: file.path, status: file.status, changedRanges, skipped: "too-large" };
+      // Size-check before loading to avoid buffering huge files.
+      // git mode: cat-file -s returns byte count without transferring content.
+      // working-tree: statSync reads inode metadata only.
+      // Both are fast; the content load only happens when size is within limit.
+      const gitSize = gitFileSize(file.path, options);
+      if (gitSize !== null) {
+        if (gitSize > maxBytes) {
+          files.push({ path: file.path, status: file.status, changedRanges, skipped: "too-large" });
+          continue;
+        }
+      } else {
+        try {
+          const stat = statSync(absolute);
+          if (!stat.isFile()) {
+            // Skip FIFOs, sockets, devices — readFileSync blocks on them indefinitely.
+            files.push({ path: file.path, status: file.status, changedRanges, skipped: "unreadable" });
+            continue;
+          }
+          if (stat.size > maxBytes) {
+            files.push({ path: file.path, status: file.status, changedRanges, skipped: "too-large" });
+            continue;
+          }
+        } catch {
+          // statSync failed — fall through; readFileSync will fail too and mark unreadable.
+        }
       }
 
-      return {
-        path: file.path,
-        status: file.status,
-        changedRanges,
-        content: readFileSync(absolute, "utf8")
-      };
+      const content = gitFileContent(file.path, options) ?? readFileSync(absolute, "utf8");
+      // Secondary check: catches the rare case where gitFileSize returned null
+      // in git mode (e.g., cat-file unavailable) but content still loaded.
+      if (Buffer.byteLength(content, "utf8") > maxBytes) {
+        files.push({ path: file.path, status: file.status, changedRanges, skipped: "too-large" });
+        continue;
+      }
+
+      const regions = await mapChangedRegions(content, file.path, changedRanges);
+      files.push({ path: file.path, status: file.status, changedRanges, content, regions });
     } catch {
-      return { path: file.path, status: file.status, changedRanges, skipped: "unreadable" };
+      files.push({ path: file.path, status: file.status, changedRanges, skipped: "unreadable" });
     }
-  });
+  }
 
   return {
     scope: describeScope(options),

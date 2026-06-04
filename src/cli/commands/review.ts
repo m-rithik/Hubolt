@@ -50,7 +50,7 @@ async function runReview(options: ReviewOptions): Promise<void> {
   const settings = resolveSettings({ configPath: options.config });
   const providerName = options.provider ?? settings.llmProvider;
   const modelName = options.model ?? settings.llmModel;
-  const context = buildContext({
+  const context = await buildContext({
     staged: options.staged,
     base: options.base,
     head: options.head,
@@ -98,6 +98,14 @@ async function runReview(options: ReviewOptions): Promise<void> {
     result = await runReviewPipeline({ context, config: settings.repo, llm });
   } catch (error) {
     spinner.stop();
+    await emitter.emit(
+      createReviewEvent({
+        type: "review.completed",
+        repo,
+        payload: { scope: context.scope, findings: 0, error: true },
+        redactionState: "metadataOnly"
+      })
+    );
     throw error;
   }
   spinner.stop();
@@ -228,6 +236,10 @@ function printContext(context: BuiltContext): void {
 
   for (const file of context.reviewable) {
     console.log(`  ${ui.label("review")}  ${file.path}  ${rangeSummary(file)}`);
+    if (file.regions && file.regions.length > 0) {
+      const regions = file.regions.map((region) => `${region.kind} ${region.name}`).join(", ");
+      console.log(ui.muted(`           regions: ${regions}`));
+    }
   }
   for (const file of context.files.filter((entry) => entry.skipped)) {
     console.log(ui.muted(`  skip    ${file.path}  (${file.skipped})`));

@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 describe("buildContext", () => {
-  test("loads content for staged files and respects ignore globs", () => {
+  test("loads content for staged files and respects ignore globs", async () => {
     writeFileSync(join(dir, "src/keep.ts"), "const a = 1;\nconst b = 2;\nconst c = 3;\n");
     writeFileSync(join(dir, "src/new.ts"), "export const greeting = 'hi';\n");
     mkdirSync(join(dir, "dist"));
@@ -37,7 +37,7 @@ describe("buildContext", () => {
     git("add", "-A");
 
     const config = RepoConfigSchema.parse({ ignore: ["dist/**"] });
-    const built = buildContext({ cwd: dir, staged: true, config });
+    const built = await buildContext({ cwd: dir, staged: true, config });
 
     expect(built.scope).toBe("staged changes");
 
@@ -52,12 +52,12 @@ describe("buildContext", () => {
     expect(keep?.changedRanges.length).toBeGreaterThan(0);
   });
 
-  test("marks oversized files as skipped instead of loading them", () => {
+  test("marks oversized files as skipped instead of loading them", async () => {
     writeFileSync(join(dir, "src/big.ts"), `${"x".repeat(2048)}\n`);
     git("add", "-A");
 
     const config = RepoConfigSchema.parse({ maxFileSizeKb: 1 });
-    const built = buildContext({ cwd: dir, staged: true, config });
+    const built = await buildContext({ cwd: dir, staged: true, config });
 
     const big = built.files.find((file) => file.path === "src/big.ts");
     expect(big?.skipped).toBe("too-large");

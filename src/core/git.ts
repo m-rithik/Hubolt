@@ -71,7 +71,7 @@ export function getChangedFiles(options: ChangedFilesOptions = {}): ChangedFile[
 
   let output: string;
   try {
-    output = execFileSync("git", args, { cwd, encoding: "utf8" });
+    output = execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`git diff failed: ${detail}`);
@@ -91,9 +91,60 @@ export function getDiffText(options: ChangedFilesOptions = {}): string {
   }
 
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+    return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`git diff failed: ${detail}`);
+  }
+}
+
+/**
+ * Return the byte size of a file from git without loading its content.
+ * Uses `git cat-file -s` so the blob is never buffered.
+ * Returns null for working-tree mode or when the ref cannot be resolved.
+ */
+export function gitFileSize(path: string, options: ChangedFilesOptions = {}): number | null {
+  const cwd = options.cwd ?? process.cwd();
+  let ref: string;
+
+  if (options.base && options.head) {
+    ref = `${options.head}:${path}`;
+  } else if (options.staged) {
+    ref = `:${path}`;
+  } else {
+    return null;
+  }
+
+  try {
+    const out = execFileSync("git", ["cat-file", "-s", ref], { cwd, encoding: "utf8" });
+    const size = Number.parseInt(out.trim(), 10);
+    return Number.isFinite(size) ? size : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a file's content from git, not from disk.
+ * - staged: reads the index version (`git show :<path>`)
+ * - commit range: reads from the head ref (`git show <head>:<path>`)
+ * - working tree: falls back to null (caller reads disk)
+ */
+export function gitFileContent(path: string, options: ChangedFilesOptions = {}): string | null {
+  const cwd = options.cwd ?? process.cwd();
+  let ref: string;
+
+  if (options.base && options.head) {
+    ref = `${options.head}:${path}`;
+  } else if (options.staged) {
+    ref = `:${path}`;
+  } else {
+    return null;
+  }
+
+  try {
+    return execFileSync("git", ["show", ref], { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+  } catch {
+    return null;
   }
 }
