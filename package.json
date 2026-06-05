@@ -1,5 +1,5 @@
 {
-  "name": "@m-rithik/hubolt",
+  "name": "hubolt",
   "version": "0.2.1",
   "description": "Context-aware AI code review assistant that is local-first, not local-only.",
   "license": "Apache-2.0",
