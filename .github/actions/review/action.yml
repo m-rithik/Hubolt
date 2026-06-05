@@ -1,0 +1,183 @@
+name: Hubolt Review Action
+description: Run Hubolt code review and upload reports
+
+inputs:
+  openai-api-key:
+    description: OpenAI API key
+    required: false
+  anthropic-api-key:
+    description: Anthropic API key
+    required: false
+  google-api-key:
+    description: Google Generative AI API key
+    required: false
+  node-version:
+    description: Node.js version
+    required: false
+    default: "20"
+  cache-enabled:
+    description: Enable cache restore/save
+    required: false
+    default: "true"
+  post-comment:
+    description: Post report as PR comment
+    required: false
+    default: "true"
+
+outputs:
+  exit-code:
+    description: Hubolt review exit code
+    value: ${{ steps.review.outputs.exit_code }}
+  report-json-path:
+    description: Path to JSON report
+    value: .hubolt/reports/report.json
+  report-md-path:
+    description: Path to Markdown report
+    value: .hubolt/reports/report.md
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install and build
+      shell: bash
+      run: |
+        npm ci
+        npm run build
+
+    - name: Restore cache
+      if: inputs.cache-enabled == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.hubolt/cache
+        key: hubolt-cache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+        restore-keys: |
+          hubolt-cache-${{ runner.os }}-${{ github.ref }}
+          hubolt-cache-${{ runner.os }}
+
+    - name: Determine review scope
+      id: scope
+      shell: bash
+      run: |
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          echo "mode=pr" >> $GITHUB_OUTPUT
+          # Use SHAs from PR event instead of refs to handle fork PRs
+          echo "base=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          echo "head=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "mode=push" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run review
+      id: review
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GOOGLE_GENERATIVE_AI_API_KEY: ${{ inputs.google-api-key }}
+      run: |
+        set +e
+
+        REPORT_DIR=".hubolt/reports"
+        mkdir -p "$REPORT_DIR"
+
+        # Fork PRs don't have access to secrets; use analyzer-only mode
+        LLM_ARGS=""
+        if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+          if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GOOGLE_GENERATIVE_AI_API_KEY" ]]; then
+            echo "Fork PR with no LLM secrets; running analyzer-only review"
+            LLM_ARGS="--no-llm"
+          fi
+        fi
+
+        if [[ "${{ steps.scope.outputs.mode }}" == "pr" ]]; then
+          node dist/cli/index.js review \
+            --base "${{ steps.scope.outputs.base }}" \
+            --head "${{ steps.scope.outputs.head }}" \
+            --json "$REPORT_DIR/report.json" \
+            --md "$REPORT_DIR/report.md" \
+            --ci \
+            $LLM_ARGS
+        else
+          node dist/cli/index.js review \
+            --json "$REPORT_DIR/report.json" \
+            --md "$REPORT_DIR/report.md" \
+            --ci \
+            $LLM_ARGS
+        fi
+
+        EXIT_CODE=$?
+        echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+        exit $EXIT_CODE
+
+    - name: Upload reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: hubolt-reports
+        path: .hubolt/reports/
+        retention-days: 30
+
+    - name: Post PR comment
+      if: |
+        always() &&
+        github.event_name == 'pull_request' &&
+        inputs.post-comment == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+
+          const reportPath = '.hubolt/reports/report.md';
+          if (!fs.existsSync(reportPath)) {
+            console.log('No report generated');
+            return;
+          }
+
+          const report = fs.readFileSync(reportPath, 'utf8');
+          const marker = '<!-- hubolt-review-comment -->';
+          const body = marker + '\n' + report;
+
+          const comments = await github.rest.issues.listComments({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo
+          });
+
+          const existingComment = comments.data.find(c => c.body.includes(marker));
+
+          if (existingComment) {
+            // Update existing comment
+            await github.rest.issues.updateComment({
+              comment_id: existingComment.id,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+            console.log('Updated existing Hubolt comment');
+          } else {
+            // Create new comment
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+            console.log('Created new Hubolt comment');
+          }
+
+    - name: Save cache
+      if: always() && inputs.cache-enabled == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.hubolt/cache
+        key: hubolt-cache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
