@@ -78,6 +78,77 @@ describe("runAnalyzers", () => {
     expect(result.skipped).toEqual([{ name: "boom", reason: "analyzer failed" }]);
   });
 
+  test("drops malformed analyzer signals without discarding valid siblings", async () => {
+    const mixed: AnalyzerProvider = {
+      name: "mixed",
+      async isAvailable() {
+        return true;
+      },
+      async analyze() {
+        return [
+          { analyzer: "mixed", ruleId: "bad.missing-range", severity: "low", message: "bad", evidence: [] } as never,
+          {
+            id: "mixed:ok:src/a.ts:1",
+            analyzer: "mixed",
+            ruleId: "mixed.ok",
+            range: { file: "src/a.ts", startLine: 1, endLine: 1, diffSide: "right" as const },
+            severity: "low" as const,
+            message: "ok",
+            evidence: []
+          }
+        ];
+      }
+    };
+    registerAnalyzerProvider("mixed", () => mixed);
+    const config = RepoConfigSchema.parse({});
+    const ctx = buildAnalyzerContext(context("const x = 1;"), { repoRoot: "/tmp/repo", config });
+
+    const result = await runAnalyzers(ctx, ["mixed"]);
+
+    expect(result.ran).toEqual(["mixed"]);
+    expect(result.skipped).toEqual([]);
+    expect(result.signals).toHaveLength(1);
+    expect(result.signals[0].ruleId).toBe("mixed.ok");
+  });
+
+  test("preserves analyzer-provided ids so same-line findings do not collide", async () => {
+    const sameLine: AnalyzerProvider = {
+      name: "same-line",
+      async isAvailable() {
+        return true;
+      },
+      async analyze() {
+        return [
+          {
+            id: "same-line:first",
+            analyzer: "same-line",
+            ruleId: "same-line.first",
+            range: { file: "src/a.ts", startLine: 1, endLine: 1, diffSide: "right" as const },
+            severity: "low" as const,
+            message: "first",
+            evidence: []
+          },
+          {
+            id: "same-line:second",
+            analyzer: "same-line",
+            ruleId: "same-line.second",
+            range: { file: "src/a.ts", startLine: 1, endLine: 1, diffSide: "right" as const },
+            severity: "low" as const,
+            message: "second",
+            evidence: []
+          }
+        ];
+      }
+    };
+    registerAnalyzerProvider("same-line", () => sameLine);
+    const config = RepoConfigSchema.parse({});
+    const ctx = buildAnalyzerContext(context("const x = 1;"), { repoRoot: "/tmp/repo", config });
+
+    const result = await runAnalyzers(ctx, ["same-line"]);
+
+    expect(result.signals.map((signal) => signal.id)).toEqual(["same-line:first", "same-line:second"]);
+  });
+
   test("skips an unavailable analyzer", async () => {
     const unavailable: AnalyzerProvider = {
       name: "off",

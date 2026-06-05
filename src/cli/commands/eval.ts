@@ -29,7 +29,7 @@ export function registerEvalCommand(program: Command): void {
     .option("--min-range-accuracy <ratio>", "fail when range accuracy is below this ratio (0-1)")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: EvalOptions) => {
-      void runSafelyAsync(() => runEvalCommand(options));
+      return runSafelyAsync(() => runEvalCommand(options));
     });
 }
 

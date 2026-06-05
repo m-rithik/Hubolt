@@ -21,6 +21,9 @@ export function renderHome(): string {
       ["hubolt analyze", "run static analyzers only, no LLM call"],
       ["hubolt security --fail-on high", "security-scoped review with a CI gate"],
       ["hubolt review --json r.json --md r.md", "write JSON and Markdown reports"],
+      ["hubolt review --ci", "deterministic output + exit code for CI"],
+      ["hubolt providers list", "list providers and API key status"],
+      ["hubolt cache", "show local result cache status"],
       ["hubolt logs tail", "show recent review events"],
       ["hubolt logs inspect", "summarize the local event log"]
     ]),

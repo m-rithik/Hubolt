@@ -2,7 +2,11 @@ import type { RepoConfig } from "../config/schema.js";
 import { getAnalyzerProvider, listAnalyzerProviders } from "../providers/analyzers/index.js";
 import { AnalyzerSignalSchema, type AnalyzerSignal } from "../types/finding.js";
 import type { AnalyzerContext, AnalyzerFile } from "../types/providers.js";
+import { cacheKey, type Cache } from "./cache.js";
 import type { BuiltContext } from "./context-builder.js";
+
+/** Bump when analyzer output logic changes, to invalidate cached signals. */
+const ANALYZER_VERSION = "1";
 
 /** Maps each `analyzers.*` config flag to its registered provider name. */
 const SECRET_SCAN_ANALYZER = ["secret", "scan"].join("-");
@@ -94,18 +98,42 @@ function addSecurityAnalyzers(config: RepoConfig, enabledKeys: Set<string>): voi
   }
 }
 
+export interface RunAnalyzersOptions {
+  /** When provided, per-analyzer results are cached keyed by file content + config. */
+  cache?: Cache;
+}
+
 /**
  * Run the selected analyzers over the context. Each analyzer is isolated: an
  * unavailable analyzer is skipped, and one that throws is recorded as skipped
  * rather than crashing the run. Signals are validated, given stable ids, and
- * deduplicated.
+ * deduplicated. With a cache, an analyzer's signals are reused when the changed
+ * file contents and config are unchanged.
  */
-export async function runAnalyzers(context: AnalyzerContext, names: string[]): Promise<AnalyzeResult> {
+export async function runAnalyzers(
+  context: AnalyzerContext,
+  names: string[],
+  options: RunAnalyzersOptions = {}
+): Promise<AnalyzeResult> {
   const collected: AnalyzerSignal[] = [];
   const ran: string[] = [];
   const skipped: SkippedAnalyzer[] = [];
 
+  const cache = options.cache;
+  const inputHash = cacheKey([
+    ...context.files.flatMap((file) => [file.path, file.content]),
+    JSON.stringify(context.config)
+  ]);
+
   for (const name of names) {
+    const key = cacheKey(["analyzer", ANALYZER_VERSION, name, inputHash]);
+    const cached = readCachedSignals(cache, key);
+    if (cached) {
+      collected.push(...cached);
+      ran.push(name);
+      continue;
+    }
+
     let provider;
     try {
       provider = getAnalyzerProvider(name);
@@ -120,12 +148,15 @@ export async function runAnalyzers(context: AnalyzerContext, names: string[]): P
         continue;
       }
       const signals = await provider.analyze(context);
+      const validated: AnalyzerSignal[] = [];
       for (const signal of signals) {
-        const parsed = AnalyzerSignalSchema.safeParse({ ...signal, id: stableId(signal) });
+        const parsed = parseAnalyzerSignal(signal);
         if (parsed.success) {
-          collected.push(parsed.data);
+          validated.push(parsed.data);
         }
       }
+      cache?.set(key, validated);
+      collected.push(...validated);
       ran.push(name);
     } catch (error) {
       skipped.push({ name, reason: messageOf(error) });
@@ -135,9 +166,45 @@ export async function runAnalyzers(context: AnalyzerContext, names: string[]): P
   return { signals: dedupe(collected), ran, skipped };
 }
 
-function stableId(signal: AnalyzerSignal): string {
-  const { file, startLine, endLine } = signal.range;
-  return `${signal.analyzer}:${signal.ruleId}:${file}:${startLine}-${endLine}`;
+function readCachedSignals(cache: Cache | undefined, key: string): AnalyzerSignal[] | null {
+  const cached = cache?.get<unknown>(key);
+  if (!Array.isArray(cached)) {
+    return null;
+  }
+
+  const signals: AnalyzerSignal[] = [];
+  for (const signal of cached) {
+    const parsed = AnalyzerSignalSchema.safeParse(signal);
+    if (!parsed.success) {
+      return null;
+    }
+    signals.push(parsed.data);
+  }
+  return signals;
+}
+
+function parseAnalyzerSignal(signal: unknown): ReturnType<typeof AnalyzerSignalSchema.safeParse> {
+  if (!signal || typeof signal !== "object") {
+    return AnalyzerSignalSchema.safeParse(signal);
+  }
+  const candidate = signal as Partial<AnalyzerSignal>;
+  const id = typeof candidate.id === "string" && candidate.id.trim().length > 0 ? candidate.id : safeStableId(signal);
+  const withGeneratedId = { ...signal, id };
+  return AnalyzerSignalSchema.safeParse(withGeneratedId);
+}
+
+function safeStableId(signal: object): string {
+  const candidate = signal as Partial<AnalyzerSignal>;
+  const range = candidate.range;
+  if (!range || typeof range !== "object") {
+    return "";
+  }
+  const file = typeof range.file === "string" ? range.file : "";
+  const startLine = typeof range.startLine === "number" ? range.startLine : "";
+  const endLine = typeof range.endLine === "number" ? range.endLine : "";
+  const analyzer = typeof candidate.analyzer === "string" ? candidate.analyzer : "";
+  const ruleId = typeof candidate.ruleId === "string" ? candidate.ruleId : "";
+  return `${analyzer}:${ruleId}:${file}:${startLine}-${endLine}`;
 }
 
 function dedupe(signals: AnalyzerSignal[]): AnalyzerSignal[] {

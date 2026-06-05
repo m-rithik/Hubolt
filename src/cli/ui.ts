@@ -1,4 +1,9 @@
-const colorEnabled = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+let colorEnabled = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+
+/** Force color output on or off (used by --ci for deterministic, plain output). */
+export function setColorEnabled(enabled: boolean): void {
+  colorEnabled = enabled;
+}
 
 const ansi = {
   reset: "\x1b[0m",

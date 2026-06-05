@@ -1,14 +1,18 @@
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Command } from "commander";
 import type { RepoConfig } from "../../config/schema.js";
 import { resolveSettings, type ResolvedSettings } from "../../config/resolve.js";
 import { buildAnalyzerContext, runAnalyzers, selectAnalyzers } from "../../core/analyze.js";
+import type { SkippedAnalyzer } from "../../core/analyze.js";
+import { assertSafeCacheDir, createFileCache, createNoopCache, defaultCacheDir, type Cache } from "../../core/cache.js";
 import { buildContext, type BuiltContext, type ReviewFile } from "../../core/context-builder.js";
 import { createJsonlEventLog, defaultEventLogPath } from "../../core/event-log.js";
 import { InProcessReviewEventEmitter } from "../../core/events.js";
 import { getGitRoot, isGitRepository } from "../../core/git.js";
 import { runReviewPipeline, type ReviewResult } from "../../core/pipeline.js";
 import { severityRank } from "../../core/rank.js";
+import { withLlmCache } from "../../core/llm-cache.js";
 import { buildReport, renderJsonReport, renderMarkdownReport } from "../../report/index.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import { createReviewEvent } from "../../types/events.js";
@@ -16,7 +20,7 @@ import { CONTEXT_ADJACENT_TAG, SeveritySchema, type AnalyzerSignal, type Finding
 import type { LLMProvider } from "../../types/providers.js";
 import { runSafelyAsync } from "../errors.js";
 import { startSpinner } from "../spinner.js";
-import { ui } from "../ui.js";
+import { setColorEnabled, ui } from "../ui.js";
 
 interface ReviewOptions {
   staged?: boolean;
@@ -30,6 +34,9 @@ interface ReviewOptions {
   failOn?: string;
   /** Commander sets this to false when --no-llm is passed. */
   llm?: boolean;
+  /** Commander sets this to false when --no-cache is passed. */
+  cache?: boolean;
+  ci?: boolean;
   json?: string;
   md?: string;
 }
@@ -59,11 +66,13 @@ export function registerReviewCommand(program: Command): void {
     .option("--model <model>", "override the LLM model for this run")
     .option("--security", "run a security-scoped review (security categories only)")
     .option("--no-llm", "skip the model; emit analyzer-only findings (no API key needed)")
+    .option("--no-cache", "do not read or write the local result cache")
+    .option("--ci", "deterministic, color-free output; exit non-zero past failOnSeverity")
     .option("--json <path>", "write a JSON report to this path")
     .option("--md <path>", "write a Markdown report to this path")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: ReviewOptions) => {
-      void runSafelyAsync(() => runReview(options));
+      return runSafelyAsync(() => runReview(options));
     });
 }
 
@@ -77,11 +86,14 @@ export function registerSecurityCommand(program: Command): void {
     .option("--fail-on <severity>", "exit non-zero when a finding reaches this severity (info|low|medium|high|critical)")
     .option("--provider <name>", "override the LLM provider for this run (openai, claude, google)")
     .option("--model <model>", "override the LLM model for this run")
+    .option("--no-llm", "skip the model; emit analyzer-only security findings (no API key needed)")
+    .option("--no-cache", "do not read or write the local result cache")
+    .option("--ci", "deterministic, color-free output for CI")
     .option("--json <path>", "write a JSON report to this path")
     .option("--md <path>", "write a Markdown report to this path")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: ReviewOptions) => {
-      void runSafelyAsync(() => runReview({ ...options, security: true }, { failOnExit: true }));
+      return runSafelyAsync(() => runReview({ ...options, security: true }, { failOnExit: true }));
     });
 }
 
@@ -94,6 +106,10 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     throw new Error("Not a git repository. Run Hubolt inside a git working tree.");
   }
 
+  if (options.ci) {
+    setColorEnabled(false);
+  }
+
   const repo = getGitRoot();
   const baseSettings = resolveSettings({ cwd: options.config ? process.cwd() : repo, configPath: options.config });
 
@@ -103,11 +119,17 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
   const repoConfig: RepoConfig = securityMode ? { ...baseSettings.repo, mode: "security" } : baseSettings.repo;
   const settings: ResolvedSettings = { ...baseSettings, mode: repoConfig.mode, repo: repoConfig };
 
-  // The security gate uses security.failOnSeverity (default "high"), distinct
-  // from the top-level failOnSeverity (default "critical") that drives the
-  // report status. Both have schema defaults, so this is never undefined.
-  const failOn = parseFailOn(options.failOn) ?? settings.repo.security.failOnSeverity;
+  // Gate severity: security runs use security.failOnSeverity (default "high"),
+  // general --ci runs use the top-level failOnSeverity (default "critical").
+  // --fail-on overrides either. All have schema defaults, so never undefined.
+  const failOn =
+    parseFailOn(options.failOn) ??
+    (securityMode ? settings.repo.security.failOnSeverity : settings.repo.failOnSeverity);
   const useLlm = options.llm !== false;
+  const cacheEnabled = options.cache !== false;
+  const cacheRoot = cacheEnabled ? assertSafeCacheDir(baseSettings.cacheDir ?? defaultCacheDir(repo), { repoRoot: repo }) : "";
+  const analyzerCache: Cache = cacheEnabled ? createFileCache(join(cacheRoot, "analyzers")) : createNoopCache();
+  const llmCache: Cache = cacheEnabled ? createFileCache(join(cacheRoot, "llm")) : createNoopCache();
   const providerName = options.provider ?? settings.llmProvider;
   const modelName = options.model ?? settings.llmModel;
   const providerLabel = useLlm ? `${providerName} (${modelName})` : "none (analyzers only)";
@@ -152,18 +174,19 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     return;
   }
 
-  const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode);
+  const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode, analyzerCache);
 
-  const llm = useLlm ? getLLMProvider(providerName, { model: modelName }) : NO_LLM_PROVIDER;
+  const baseLlm = useLlm ? getLLMProvider(providerName, { model: modelName }) : NO_LLM_PROVIDER;
+  const llm = useLlm ? withLlmCache(baseLlm, llmCache, modelName) : baseLlm;
   const spinnerLabel = useLlm
     ? `Reviewing ${context.reviewable.length} file(s) with ${providerName}...`
     : `Analyzing ${context.reviewable.length} file(s) (no model call)...`;
-  const spinner = startSpinner(spinnerLabel);
+  const spinner = options.ci ? null : startSpinner(spinnerLabel);
   let result;
   try {
     result = await runReviewPipeline({ context, config: settings.repo, llm, analyzerSignals });
   } catch (error) {
-    spinner.stop();
+    spinner?.stop();
     await emitter.emit(
       createReviewEvent({
         type: "review.completed",
@@ -174,7 +197,7 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     );
     throw error;
   }
-  spinner.stop();
+  spinner?.stop();
 
   for (const finding of result.findings) {
     await emitter.emit(
@@ -212,8 +235,8 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     analyzerSignals
   });
 
-  if (runOptions.failOnExit) {
-    applyFailOnGate(result, failOn);
+  if (runOptions.failOnExit || options.ci) {
+    applyFailOnGate(result, failOn, securityMode ? "Security gate" : "CI gate");
   }
 }
 
@@ -241,16 +264,16 @@ function writeReports(
  * Set the process exit code (CI gate) when any finding reaches the fail-on
  * severity. Prints a clear pass/fail line either way.
  */
-function applyFailOnGate(result: ReviewResult, failOn: Severity): void {
+function applyFailOnGate(result: ReviewResult, failOn: Severity, label: string): void {
   const threshold = severityRank(failOn);
   const breaching = result.findings.filter((finding) => severityRank(finding.severity) >= threshold);
 
   console.log("");
   if (breaching.length > 0) {
     process.exitCode = 1;
-    console.log(ui.error(`Security gate failed: ${breaching.length} finding(s) at or above "${failOn}".`));
+    console.log(ui.error(`${label} failed: ${breaching.length} finding(s) at or above "${failOn}".`));
   } else {
-    console.log(ui.success(`Security gate passed: no findings at or above "${failOn}".`));
+    console.log(ui.success(`${label} passed: no findings at or above "${failOn}".`));
   }
 }
 
@@ -275,21 +298,24 @@ async function collectAnalyzerSignals(
   settings: ResolvedSettings,
   emitter: InProcessReviewEventEmitter,
   repo: string,
-  securityMode: boolean
+  securityMode: boolean,
+  cache: Cache
 ): Promise<AnalyzerSignal[]> {
-  const { names } = selectAnalyzers(settings.repo, { securityMode });
+  const { names, skipped: notSelected } = selectAnalyzers(settings.repo, { securityMode });
   if (names.length === 0) {
+    printSkippedAnalyzers(notSelected);
     return [];
   }
 
   const analyzerContext = buildAnalyzerContext(context, { repoRoot: repo, config: settings.repo });
-  const { signals, ran } = await runAnalyzers(analyzerContext, names);
+  const { signals, ran, skipped } = await runAnalyzers(analyzerContext, names, { cache });
+  const allSkipped = [...notSelected, ...skipped];
 
   await emitter.emit(
     createReviewEvent({
       type: "analyzer.completed",
       repo,
-      payload: { ran, signals: signals.length },
+      payload: { ran, skipped: allSkipped, signals: signals.length },
       redactionState: "metadataOnly"
     })
   );
@@ -298,8 +324,15 @@ async function collectAnalyzerSignals(
     console.log("");
     console.log(ui.muted(`Analyzers: ${ran.join(", ")} (${signals.length} signal${signals.length === 1 ? "" : "s"})`));
   }
+  printSkippedAnalyzers(allSkipped);
 
   return signals;
+}
+
+function printSkippedAnalyzers(skipped: SkippedAnalyzer[]): void {
+  for (const item of skipped) {
+    console.log(ui.muted(`skipped ${item.name}: ${item.reason}`));
+  }
 }
 
 function printHeader(context: BuiltContext, settings: ResolvedSettings, providerLabel: string): void {

@@ -27,7 +27,7 @@ export function registerSetupCommand(program: Command): void {
     .description("Interactive setup: pick a provider, save model and API key to .env, optionally create .hubolt.yml.")
     .option("--print", "print a starter .hubolt.yml instead of running interactive setup")
     .action((options: SetupOptions) => {
-      void runSafelyAsync(() => runSetup(options));
+      return runSafelyAsync(() => runSetup(options));
     });
 }
 

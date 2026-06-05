@@ -23,7 +23,7 @@ export function registerAnalyzeCommand(program: Command): void {
     .option("--head <ref>", "head ref for a commit-range analysis (requires --base)")
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((options: AnalyzeOptions) => {
-      void runSafelyAsync(() => runAnalyze(options));
+      return runSafelyAsync(() => runAnalyze(options));
     });
 }
 
