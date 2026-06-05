@@ -131,6 +131,95 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+## CLI Commands Quick Reference
+
+### Review Commands
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `hubolt review` | Review all working-tree changes | `hubolt review` |
+| `hubolt review --staged` | Review staged changes only | `hubolt review --staged` |
+| `hubolt review [file]` | Review a specific file | `hubolt review src/app.ts` |
+| `hubolt review --base HEAD~1 --head HEAD` | Review commit range | `hubolt review --base main --head feature` |
+| `hubolt security` | Security-focused review (fails on high) | `hubolt security` |
+| `hubolt security --fail-on critical` | Security review with custom severity | `hubolt security --fail-on critical` |
+| `hubolt analyze` | Analyzers only, no LLM | `hubolt analyze --no-cache` |
+
+### Common Options
+
+| Option | Purpose | Example |
+|--------|---------|---------|
+| `--provider <name>` | Override LLM provider | `hubolt review --provider openai` |
+| `--model <model>` | Override model | `hubolt review --model gpt-4` |
+| `--no-llm` | Skip LLM, analyzers only | `hubolt review --no-llm` |
+| `--no-cache` | Disable result caching | `hubolt review --no-cache` |
+| `--json <path>` | Write JSON report | `hubolt review --json report.json` |
+| `--md <path>` | Write Markdown report | `hubolt review --md report.md` |
+| `--ci` | CI mode (deterministic + exit codes) | `hubolt review --ci --fail-on high` |
+| `--fail-on <severity>` | Exit code gate | `hubolt security --fail-on medium` |
+| `--config <path>` | Custom config file | `hubolt review --config .hubolt.prod.yml` |
+
+### Setup & Configuration
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `hubolt setup` | Configure LLM provider | `hubolt setup` |
+| `hubolt setup --print` | Print sample config | `hubolt setup --print > .hubolt.yml` |
+| `hubolt config validate` | Validate config & credentials | `hubolt config validate` |
+| `hubolt config show` | Display current config | `hubolt config show` |
+
+### Server Commands (Team Mode)
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `hubolt server` | Start team review server | `hubolt server --port 3000` |
+| `hubolt server bootstrap` | Create org & API key | `hubolt server bootstrap --org myteam --email admin@team.com` |
+| `hubolt push-report` | Push review to server | `hubolt push-report --report r.json --api-key $KEY` |
+
+### Utility Commands
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `hubolt cache` | Show cache status | `hubolt cache` |
+| `hubolt cache clear` | Clear cache | `hubolt cache clear` |
+| `hubolt logs tail` | View recent events | `hubolt logs tail` |
+| `hubolt logs inspect` | Summarize event log | `hubolt logs inspect` |
+| `hubolt providers list` | List configured providers | `hubolt providers list` |
+| `hubolt eval` | Run evaluation harness | `hubolt eval --suite cwe` |
+
+### Global Options
+
+| Option | Purpose |
+|--------|---------|
+| `--help` | Show command help |
+| `--version` | Show version |
+
+### Common Workflows
+
+**Local Development:**
+```bash
+hubolt setup                              # One-time setup
+hubolt review --staged                    # Review before commit
+hubolt review --json report.json --md r.md # Generate reports
+hubolt logs tail                          # View analysis events
+```
+
+**CI/CD Gates:**
+```bash
+hubolt security --ci --fail-on high       # Fail if high severity found
+hubolt review --ci --fail-on critical     # General review gate
+```
+
+**Team Server:**
+```bash
+docker-compose up -d                      # Start PostgreSQL
+npx prisma migrate deploy                 # Run migrations
+hubolt server --port 3000                 # Start server
+hubolt push-report --report r.json        # Push to server
+```
+
+See [CLI_COMMANDS.md](docs/CLI_COMMANDS.md) for detailed documentation of all commands.
+
 ## Configuration Preview
 
 Hubolt is configured with repository rules plus machine-level secrets.

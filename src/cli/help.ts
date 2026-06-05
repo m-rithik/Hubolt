@@ -9,26 +9,45 @@ export function renderHome(): string {
   return [
     ui.title("Hubolt"),
     ui.rule(),
-    "Context-aware AI code review assistant.",
+    "Context-aware AI code review assistant. Local-first, not local-only.",
     "",
-    ui.title("Commands"),
+    ui.title("Core Commands"),
     ui.table([
-      ["hubolt setup", "pick a provider (OpenAI/Claude/Google); saves to .env"],
-      ["hubolt setup --print", "print a starter .hubolt.yml"],
-      ["hubolt config validate", "validate config, defaults, and credentials"],
-      ["hubolt review", "review working-tree changes with the LLM"],
-      ["hubolt review --staged", "review staged changes"],
-      ["hubolt analyze", "run static analyzers only, no LLM call"],
-      ["hubolt security --fail-on high", "security-scoped review with a CI gate"],
-      ["hubolt review --json r.json --md r.md", "write JSON and Markdown reports"],
-      ["hubolt review --ci", "deterministic output + exit code for CI"],
-      ["hubolt providers list", "list providers and API key status"],
-      ["hubolt cache", "show local result cache status"],
-      ["hubolt logs tail", "show recent review events"],
-      ["hubolt logs inspect", "summarize the local event log"]
+      ["hubolt setup", "Configure LLM provider (Claude/OpenAI/Google)"],
+      ["hubolt review", "Review working-tree changes with AI analysis"],
+      ["hubolt review [file]", "Review a specific file"],
+      ["hubolt review --staged", "Review staged changes only"],
+      ["hubolt security", "Security-focused review (fails on high severity)"],
+      ["hubolt analyze", "Run static analyzers only (no LLM)"],
     ]),
     "",
-    ui.muted("Run hubolt --help for the full command list.")
+    ui.title("Options for Review Commands"),
+    ui.table([
+      ["--provider <name>", "Override LLM: anthropic, openai, google"],
+      ["--model <model>", "Override model (e.g., gpt-4, claude-opus)"],
+      ["--no-llm", "Skip LLM, analyzers only"],
+      ["--json <path>", "Write JSON report to file"],
+      ["--md <path>", "Write Markdown report to file"],
+      ["--ci", "CI mode: deterministic output + exit codes"],
+      ["--fail-on <severity>", "Exit 1 if findings >= severity level"],
+    ]),
+    "",
+    ui.title("Server Commands (Team Workflows)"),
+    ui.table([
+      ["hubolt server", "Start the team review server (requires PostgreSQL)"],
+      ["hubolt server bootstrap", "Create first org, user, and API key"],
+      ["hubolt push-report", "Push local review to server"],
+    ]),
+    "",
+    ui.title("Utility Commands"),
+    ui.table([
+      ["hubolt config validate", "Check config and credentials"],
+      ["hubolt cache", "Show/clear analysis cache"],
+      ["hubolt logs tail", "View recent review events"],
+      ["hubolt providers list", "List configured LLM providers"],
+    ]),
+    "",
+    ui.muted("Run hubolt --help for full details or hubolt <command> --help for command-specific help.")
   ].join("\n");
 }
 
