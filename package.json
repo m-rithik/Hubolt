@@ -1,6 +1,6 @@
 {
   "name": "@m-rithik/hubolt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Context-aware AI code review assistant that is local-first, not local-only.",
   "license": "Apache-2.0",
   "type": "module",
