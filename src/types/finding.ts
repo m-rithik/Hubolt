@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RangeValidators } from "../core/validators.js";
 
 export const SeveritySchema = z.enum(["info", "low", "medium", "high", "critical"]);
 export type Severity = z.infer<typeof SeveritySchema>;
@@ -25,8 +26,8 @@ export const ReviewRangeSchema = z
     diffSide: z.enum(["left", "right"]).default("right"),
     githubPosition: z.number().int().positive().optional()
   })
-  .refine((range) => range.endLine >= range.startLine, {
-    message: "endLine must be greater than or equal to startLine"
+  .refine((range) => RangeValidators.isValidLineRange(range.startLine, range.endLine), {
+    message: RangeValidators.lineRangeMessage()
   });
 export type ReviewRange = z.infer<typeof ReviewRangeSchema>;
 
@@ -78,12 +79,20 @@ export type AnalyzerSignal = z.infer<typeof AnalyzerSignalSchema>;
  * or value constraints (those keywords are unsupported in strict mode). The
  * pipeline assigns identity (fingerprint, source) and maps this onto the rich
  * Finding/ReviewRange shape.
+ *
+ * Note: Refinement validation is added post-LLM to catch structural errors
+ * without breaking OpenAI's strict mode schema generation.
  */
-export const LLMRangeSchema = z.object({
-  file: z.string(),
-  startLine: z.number().int(),
-  endLine: z.number().int()
-});
+export const LLMRangeSchema = z
+  .object({
+    file: z.string(),
+    startLine: z.number().int(),
+    endLine: z.number().int()
+  })
+  .refine((range) => RangeValidators.isValidLineRange(range.startLine, range.endLine), {
+    message: RangeValidators.lineRangeMessage(),
+    path: ["startLine"]
+  });
 export type LLMRange = z.infer<typeof LLMRangeSchema>;
 
 export const LLMFindingSchema = z.object({

@@ -1,0 +1,354 @@
+import { randomUUID } from "node:crypto";
+import { PrismaClient } from "../../generated/prisma/client.js";
+
+export interface BudgetCheckResult {
+  allowed: boolean;
+  reason?: string;
+  currentCost: number;
+  monthlyLimit: number;
+  percentageUsed: number;
+}
+
+export interface RateLimitCheckResult {
+  allowed: boolean;
+  reason?: string;
+  requestCount: number;
+  maxRequests: number;
+}
+
+export interface UsageReservationResult {
+  allowed: boolean;
+  statusCode?: 402 | 429;
+  reason?: string;
+}
+
+interface BudgetRow {
+  id: string;
+  currentMonthCostUsd: number;
+  monthlyLimitUsd: number;
+  alertThresholdPct: number;
+}
+
+interface RateLimitRow {
+  requestCount: number;
+  maxRequestsPerDay: number;
+}
+
+export class BudgetService {
+  constructor(private db: PrismaClient) {}
+
+  async reserveUsage(
+    orgId: string,
+    provider: string,
+    model: string,
+    estimatedCostUsd: number
+  ): Promise<UsageReservationResult> {
+    try {
+      await this.db.$transaction(async (tx) => {
+        const now = new Date();
+        const dayStart = startOfUtcDay(now);
+
+        if (estimatedCostUsd > 0) {
+          const nextMonth = startOfNextUtcMonth(now);
+
+          await tx.$executeRaw`
+            UPDATE "budgets"
+            SET "currentMonthCostUsd" = 0,
+                "currentMonthResets" = ${nextMonth},
+                "updatedAt" = ${now}
+            WHERE "orgId" = ${orgId}
+              AND "provider" = ${provider}
+              AND "currentMonthResets" <= ${now}
+          `;
+
+          const budgetRows = await tx.$queryRaw<BudgetRow[]>`
+            UPDATE "budgets"
+            SET "currentMonthCostUsd" = "currentMonthCostUsd" + ${estimatedCostUsd},
+                "updatedAt" = ${now}
+            WHERE "orgId" = ${orgId}
+              AND "provider" = ${provider}
+              AND ("currentMonthCostUsd" + ${estimatedCostUsd}) <= "monthlyLimitUsd"
+            RETURNING "id", "currentMonthCostUsd", "monthlyLimitUsd", "alertThresholdPct"
+          `;
+
+          if (budgetRows.length === 0) {
+            const existingBudget = await tx.$queryRaw<BudgetRow[]>`
+              SELECT "id", "currentMonthCostUsd", "monthlyLimitUsd", "alertThresholdPct"
+              FROM "budgets"
+              WHERE "orgId" = ${orgId}
+                AND "provider" = ${provider}
+              LIMIT 1
+            `;
+
+            if (existingBudget.length > 0) {
+              throw new UsageLimitError({
+                allowed: false,
+                statusCode: 402,
+                reason: `Budget exceeded for provider ${provider}`
+              });
+            }
+          } else {
+            const budget = budgetRows[0];
+            if (
+              budget.monthlyLimitUsd > 0 &&
+              budget.currentMonthCostUsd > budget.monthlyLimitUsd * (budget.alertThresholdPct / 100)
+            ) {
+              await tx.auditEvent.create({
+                data: {
+                  orgId,
+                  action: "budget.alert",
+                  resource: "budget",
+                  resourceId: budget.id,
+                  details: JSON.stringify({
+                    provider,
+                    percentageUsed: (budget.currentMonthCostUsd / budget.monthlyLimitUsd) * 100,
+                    currentCost: budget.currentMonthCostUsd,
+                    limit: budget.monthlyLimitUsd
+                  })
+                }
+              });
+            }
+          }
+        }
+
+        const rateLimitRows = await tx.$queryRaw<RateLimitRow[]>`
+          INSERT INTO "rate_limit_windows"
+            ("id", "orgId", "provider", "model", "windowStart", "requestCount", "maxRequestsPerDay")
+          VALUES
+            (${randomUUID()}, ${orgId}, ${provider}, ${model}, ${dayStart}, 1, 1000)
+          ON CONFLICT ("orgId", "provider", "model", "windowStart")
+          DO UPDATE SET "requestCount" = "rate_limit_windows"."requestCount" + 1
+          WHERE "rate_limit_windows"."requestCount" < "rate_limit_windows"."maxRequestsPerDay"
+          RETURNING "requestCount", "maxRequestsPerDay"
+        `;
+
+        if (rateLimitRows.length === 0) {
+          throw new UsageLimitError({
+            allowed: false,
+            statusCode: 429,
+            reason: `Rate limit exceeded for ${provider}/${model}`
+          });
+        }
+      });
+
+      return { allowed: true };
+    } catch (error) {
+      if (error instanceof UsageLimitError) {
+        return error.result;
+      }
+      throw error;
+    }
+  }
+
+  async checkBudget(
+    orgId: string,
+    provider: string,
+    estimatedCostUsd: number
+  ): Promise<BudgetCheckResult> {
+    let budget = await this.db.budget.findUnique({
+      where: { orgId_provider: { orgId, provider } }
+    });
+
+    if (!budget) {
+      return {
+        allowed: true,
+        currentCost: 0,
+        monthlyLimit: 0,
+        percentageUsed: 0
+      };
+    }
+
+    const now = new Date();
+    if (now >= budget.currentMonthResets) {
+      const nextMonth = new Date(now);
+      nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+      nextMonth.setUTCDate(1);
+      nextMonth.setUTCHours(0, 0, 0, 0);
+
+      budget = await this.db.budget.update({
+        where: { id: budget.id },
+        data: {
+          currentMonthCostUsd: 0,
+          currentMonthResets: nextMonth
+        }
+      });
+    }
+
+    const totalCost = budget.currentMonthCostUsd + estimatedCostUsd;
+    const percentageUsed = budget.monthlyLimitUsd > 0
+      ? (totalCost / budget.monthlyLimitUsd) * 100
+      : 0;
+
+    if (totalCost > budget.monthlyLimitUsd) {
+      return {
+        allowed: false,
+        reason: `Budget exceeded for provider ${provider}`,
+        currentCost: budget.currentMonthCostUsd,
+        monthlyLimit: budget.monthlyLimitUsd,
+        percentageUsed
+      };
+    }
+
+    return {
+      allowed: true,
+      currentCost: budget.currentMonthCostUsd,
+      monthlyLimit: budget.monthlyLimitUsd,
+      percentageUsed
+    };
+  }
+
+  async deductBudget(
+    orgId: string,
+    provider: string,
+    costUsd: number
+  ): Promise<void> {
+    if (costUsd <= 0) {
+      return;
+    }
+
+    const budget = await this.db.budget.findUnique({
+      where: { orgId_provider: { orgId, provider } }
+    });
+
+    if (!budget) {
+      return;
+    }
+
+    await this.db.budget.update({
+      where: { orgId_provider: { orgId, provider } },
+      data: { currentMonthCostUsd: { increment: costUsd } }
+    });
+
+    const updated = await this.db.budget.findUnique({
+      where: { orgId_provider: { orgId, provider } }
+    });
+
+    if (
+      updated &&
+      updated.currentMonthCostUsd > budget.monthlyLimitUsd * (budget.alertThresholdPct / 100)
+    ) {
+      await this.db.auditEvent.create({
+        data: {
+          orgId,
+          action: "budget.alert",
+          resource: "budget",
+          resourceId: budget.id,
+          details: JSON.stringify({
+            provider,
+            percentageUsed: (updated.currentMonthCostUsd / budget.monthlyLimitUsd) * 100,
+            currentCost: updated.currentMonthCostUsd,
+            limit: budget.monthlyLimitUsd
+          })
+        }
+      });
+    }
+  }
+
+  async checkRateLimit(
+    orgId: string,
+    provider: string,
+    model: string
+  ): Promise<RateLimitCheckResult> {
+    const now = new Date();
+    const dayStart = new Date(now);
+    dayStart.setUTCHours(0, 0, 0, 0);
+
+    const window = await this.db.rateLimitWindow.findUnique({
+      where: {
+        orgId_provider_model_windowStart: {
+          orgId,
+          provider,
+          model,
+          windowStart: dayStart
+        }
+      }
+    });
+
+    if (!window) {
+      return {
+        allowed: true,
+        requestCount: 0,
+        maxRequests: 1000
+      };
+    }
+
+    const maxRequests = window.maxRequestsPerDay;
+    const nextCount = window.requestCount + 1;
+
+    if (nextCount > maxRequests) {
+      return {
+        allowed: false,
+        reason: `Rate limit exceeded for ${provider}/${model}`,
+        requestCount: window.requestCount,
+        maxRequests
+      };
+    }
+
+    return {
+      allowed: true,
+      requestCount: window.requestCount,
+      maxRequests
+    };
+  }
+
+  async incrementRateLimit(
+    orgId: string,
+    provider: string,
+    model: string
+  ): Promise<void> {
+    const now = new Date();
+    const dayStart = new Date(now);
+    dayStart.setUTCHours(0, 0, 0, 0);
+
+    await this.db.rateLimitWindow.upsert({
+      where: {
+        orgId_provider_model_windowStart: {
+          orgId,
+          provider,
+          model,
+          windowStart: dayStart
+        }
+      },
+      create: {
+        orgId,
+        provider,
+        model,
+        windowStart: dayStart,
+        requestCount: 1
+      },
+      update: { requestCount: { increment: 1 } }
+    });
+  }
+
+  async resetMonthlyBudgets(orgId: string): Promise<void> {
+    const now = new Date();
+    const nextMonth = new Date(now);
+    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+    nextMonth.setUTCDate(1);
+    nextMonth.setUTCHours(0, 0, 0, 0);
+
+    await this.db.budget.updateMany({
+      where: { orgId },
+      data: {
+        currentMonthCostUsd: 0,
+        currentMonthResets: nextMonth
+      }
+    });
+  }
+}
+
+class UsageLimitError extends Error {
+  constructor(public result: UsageReservationResult) {
+    super(result.reason);
+  }
+}
+
+function startOfUtcDay(value: Date): Date {
+  const dayStart = new Date(value);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  return dayStart;
+}
+
+function startOfNextUtcMonth(value: Date): Date {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 1));
+}

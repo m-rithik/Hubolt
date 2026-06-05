@@ -41,6 +41,7 @@ coverage/
 # Prisma local artifacts
 prisma/*.db
 prisma/migrations/dev/
+src/generated/
 
 # OS and editor files
 .DS_Store

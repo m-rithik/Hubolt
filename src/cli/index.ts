@@ -8,8 +8,10 @@ import { registerConfigCommand } from "./commands/config.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerLogsCommand } from "./commands/logs.js";
 import { registerProvidersCommand } from "./commands/providers.js";
+import { registerPushReportCommand } from "./commands/push-report.js";
 import { registerReportCommand } from "./commands/report.js";
 import { registerReviewCommand, registerSecurityCommand } from "./commands/review.js";
+import { registerServerCommand } from "./commands/server.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { configureCliHelp, renderHome } from "./help.js";
 
@@ -27,9 +29,11 @@ registerSecurityCommand(program);
 registerAnalyzeCommand(program);
 registerEvalCommand(program);
 registerReportCommand(program);
+registerPushReportCommand(program);
 registerProvidersCommand(program);
 registerCacheCommand(program);
 registerLogsCommand(program);
+registerServerCommand(program);
 configureCliHelp(program);
 
 program.action(() => {

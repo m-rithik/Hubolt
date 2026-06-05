@@ -59,9 +59,9 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.hubolt/cache
-        key: hubolt-cache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+        key: hubolt-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
         restore-keys: |
-          hubolt-cache-${{ runner.os }}-${{ github.ref }}
+          hubolt-cache-${{ runner.os }}-${{ github.ref_name }}
           hubolt-cache-${{ runner.os }}
 
     - name: Determine review scope
@@ -93,7 +93,7 @@ runs:
         # Fork PRs don't have access to secrets; use analyzer-only mode
         LLM_ARGS=""
         if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
-          if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GOOGLE_GENERATIVE_AI_API_KEY" ]]; then
+          if [[ -z "${OPENAI_API_KEY}" && -z "${ANTHROPIC_API_KEY}" && -z "${GOOGLE_GENERATIVE_AI_API_KEY}" ]]; then
             echo "Fork PR with no LLM secrets; running analyzer-only review"
             LLM_ARGS="--no-llm"
           fi
@@ -103,16 +103,16 @@ runs:
           node dist/cli/index.js review \
             --base "${{ steps.scope.outputs.base }}" \
             --head "${{ steps.scope.outputs.head }}" \
-            --json "$REPORT_DIR/report.json" \
-            --md "$REPORT_DIR/report.md" \
+            --json "${REPORT_DIR}/report.json" \
+            --md "${REPORT_DIR}/report.md" \
             --ci \
-            $LLM_ARGS
+            ${LLM_ARGS}
         else
           node dist/cli/index.js review \
-            --json "$REPORT_DIR/report.json" \
-            --md "$REPORT_DIR/report.md" \
+            --json "${REPORT_DIR}/report.json" \
+            --md "${REPORT_DIR}/report.md" \
             --ci \
-            $LLM_ARGS
+            ${LLM_ARGS}
         fi
 
         EXIT_CODE=$?
@@ -136,6 +136,7 @@ runs:
       with:
         script: |
           const fs = require('fs');
+          const { GitHubCommentManager, exponentialBackoff } = require('./.github/actions/review/utils.cjs');
 
           const reportPath = '.hubolt/reports/report.md';
           if (!fs.existsSync(reportPath)) {
@@ -144,35 +145,37 @@ runs:
           }
 
           const report = fs.readFileSync(reportPath, 'utf8');
-          const marker = '<!-- hubolt-review-comment -->';
-          const body = marker + '\n' + report;
 
-          const comments = await github.rest.issues.listComments({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo
-          });
+          try {
+            const manager = new GitHubCommentManager(
+              github,
+              context.repo.owner,
+              context.repo.repo,
+              context.issue.number
+            );
 
-          const existingComment = comments.data.find(c => c.body.includes(marker));
+            // Check rate limits
+            if (!(await manager.checkRateLimit())) {
+              console.warn('GitHub API rate limit low, skipping comment');
+              return;
+            }
 
-          if (existingComment) {
-            // Update existing comment
-            await github.rest.issues.updateComment({
-              comment_id: existingComment.id,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-            console.log('Updated existing Hubolt comment');
-          } else {
-            // Create new comment
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-            console.log('Created new Hubolt comment');
+            // Use exponential backoff for comment operations
+            const withRetry = exponentialBackoff(1000, 3);
+
+            const existingComment = await withRetry(() => manager.findExistingComment());
+
+            if (existingComment) {
+              await withRetry(() => manager.updateComment(existingComment.id, report));
+              console.log('Updated existing Hubolt comment');
+            } else {
+              await withRetry(() => manager.createComment(report));
+              console.log('Created new Hubolt comment');
+            }
+          } catch (error) {
+            console.error('Failed to post PR comment:', error.message);
+            // Don't fail the workflow if comment posting fails
+            core.warning(`Could not post Hubolt review comment: ${error.message}`);
           }
 
     - name: Save cache
@@ -180,4 +183,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: ~/.hubolt/cache
-        key: hubolt-cache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+        key: hubolt-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}

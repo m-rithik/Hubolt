@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repos    Repository[]
+  members  OrganizationMember[]
+  budgets  Budget[]
+  apiKeys  ApiKey[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id    String @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role String @default("viewer")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, userId])
+  @@map("organization_members")
+}
+
+model User {
+  id    String @id @default(cuid())
+  email String @unique
+  name  String?
+
+  orgs OrganizationMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model ApiKey {
+  id    String @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  name       String
+  keyHash    String @unique @db.VarChar(255)
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model Repository {
+  id    String @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  name     String
+  fullName String
+  url      String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reviews Review[]
+
+  @@unique([orgId, fullName])
+  @@map("repositories")
+}
+
+model Review {
+  id    String @id @default(cuid())
+  repoId String
+  repo  Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  fingerprint String
+  scope       String
+  provider    String
+  model       String
+
+  summary    String?
+  findingCount Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  findings         Finding[]
+  analyzerSignals AnalyzerSignal[]
+  modelUsage      ModelUsage[]
+
+  @@unique([repoId, fingerprint])
+  @@index([repoId])
+  @@index([createdAt])
+  @@map("reviews")
+}
+
+model Finding {
+  id       String @id @default(cuid())
+  reviewId String
+  review   Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  ruleId      String
+  message     String
+  severity    String
+  file        String
+  lineStart   Int
+  lineEnd     Int
+
+  fingerprint String
+  confidence  Float @default(0.5)
+
+  createdAt DateTime @default(now())
+
+  @@unique([reviewId, fingerprint])
+  @@index([reviewId])
+  @@index([severity])
+  @@map("findings")
+}
+
+model AnalyzerSignal {
+  id       String @id @default(cuid())
+  reviewId String
+  review   Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  analyzer String
+  ruleId   String
+  message  String
+  severity String
+  file     String
+  lineStart Int
+  lineEnd   Int
+
+  createdAt DateTime @default(now())
+
+  @@index([reviewId])
+  @@index([analyzer])
+  @@map("analyzer_signals")
+}
+
+model ModelUsage {
+  id       String @id @default(cuid())
+  reviewId String
+  review   Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  provider         String
+  model            String
+  inputTokens      Int
+  outputTokens     Int
+  estimatedCostUsd Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([reviewId])
+  @@map("model_usage")
+}
+
+model Budget {
+  id    String @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  provider            String
+  monthlyLimitUsd     Float
+  alertThresholdPct   Int @default(80)
+
+  currentMonthCostUsd Float @default(0)
+  currentMonthResets  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, provider])
+  @@map("budgets")
+}
+
+model AuditEvent {
+  id    String @id @default(cuid())
+  orgId String
+
+  action     String
+  resource   String
+  resourceId String?
+  details    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId])
+  @@index([createdAt])
+  @@map("audit_events")
+}
+
+model RateLimitWindow {
+  id    String @id @default(cuid())
+  orgId String
+
+  provider         String
+  model            String
+  windowStart      DateTime
+  requestCount     Int @default(0)
+  maxRequestsPerDay Int @default(1000)
+
+  @@unique([orgId, provider, model, windowStart])
+  @@map("rate_limit_windows")
+}

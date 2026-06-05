@@ -9,9 +9,6 @@ export interface RedactionOptions {
 
 const PLACEHOLDER = "[REDACTED]";
 
-// Secret-like assignment: a key whose name contains a sensitive word, assigned
-// to a quoted literal. Captures name + operator + quote so they are preserved
-// and only the value is replaced (keeps the line intact for line numbering).
 const ASSIGNMENT =
   /\b(\w*(?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|private[_-]?key|client[_-]?secret|auth|credential)\w*)\b(\s*[:=]\s*)(?:'((?:\\.|[^'\\\n]){4,})'|"((?:\\.|[^"\\\n]){4,})"|`((?:\\.|[^`\\\n]){4,})`)/gi;
 

@@ -1,0 +1,244 @@
+import { FastifyInstance } from "fastify";
+import { ServerContext } from "../app.js";
+import { hashApiKey } from "../api-keys.js";
+import { BudgetService } from "../services/budget.js";
+import { z } from "zod";
+
+const IngestPayloadSchema = z.object({
+  apiKey: z.string().min(1),
+  repository: z.object({
+    name: z.string(),
+    fullName: z.string(),
+    url: z.string().url()
+  }),
+  review: z.object({
+    fingerprint: z.string(),
+    scope: z.string(),
+    provider: z.string(),
+    model: z.string(),
+    summary: z.string().optional(),
+    findingCount: z.number().int().min(0)
+  }),
+  findings: z.array(
+    z.object({
+      ruleId: z.string(),
+      message: z.string(),
+      severity: z.enum(["info", "low", "medium", "high", "critical"]),
+      file: z.string(),
+      lineStart: z.number().int(),
+      lineEnd: z.number().int(),
+      fingerprint: z.string(),
+      confidence: z.number().min(0).max(1).default(0.5)
+    })
+  ),
+  analyzerSignals: z.array(
+    z.object({
+      analyzer: z.string(),
+      ruleId: z.string(),
+      message: z.string(),
+      severity: z.enum(["info", "low", "medium", "high", "critical"]),
+      file: z.string(),
+      lineStart: z.number().int(),
+      lineEnd: z.number().int()
+    })
+  ).optional(),
+  modelUsage: z.object({
+    provider: z.string(),
+    model: z.string(),
+    inputTokens: z.number().int().min(0),
+    outputTokens: z.number().int().min(0),
+    estimatedCostUsd: z.number().min(0).default(0)
+  }).optional()
+});
+
+export type IngestPayload = z.infer<typeof IngestPayloadSchema>;
+
+export interface IngestResponse {
+  success: boolean;
+  reviewId: string;
+  message: string;
+}
+
+export function registerIngestRoutes(fastify: FastifyInstance, context: ServerContext): void {
+  const budgetService = new BudgetService(context.db);
+
+  fastify.post<{ Body: IngestPayload; Reply: IngestResponse }>(
+    "/ingest/review",
+    async (request, reply) => {
+      try {
+        const payload = IngestPayloadSchema.parse(request.body);
+
+        const apiKey = await context.db.apiKey.findUnique({
+          where: { keyHash: hashApiKey(payload.apiKey) },
+          include: { org: true }
+        });
+
+        if (!apiKey || !apiKey.org) {
+          reply.status(401).send({
+            success: false,
+            reviewId: "",
+            message: "Invalid API key"
+          });
+          return;
+        }
+
+        const provider = payload.modelUsage?.provider || payload.review.provider;
+        const model = payload.modelUsage?.model || payload.review.model;
+
+        const estimatedCost = payload.modelUsage?.estimatedCostUsd || 0;
+
+        const reservation = await budgetService.reserveUsage(
+          apiKey.orgId,
+          provider,
+          model,
+          estimatedCost
+        );
+
+        if (!reservation.allowed) {
+          reply.status(reservation.statusCode ?? 429).send({
+            success: false,
+            reviewId: "",
+            message: reservation.reason ?? "Usage limit exceeded"
+          });
+          return;
+        }
+
+        const repo = await context.db.repository.upsert({
+          where: { orgId_fullName: { orgId: apiKey.orgId, fullName: payload.repository.fullName } },
+          create: {
+            orgId: apiKey.orgId,
+            name: payload.repository.name,
+            fullName: payload.repository.fullName,
+            url: payload.repository.url
+          },
+          update: {
+            name: payload.repository.name,
+            url: payload.repository.url
+          }
+        });
+
+        const review = await context.db.review.upsert({
+          where: { repoId_fingerprint: { repoId: repo.id, fingerprint: payload.review.fingerprint } },
+          create: {
+            repoId: repo.id,
+            fingerprint: payload.review.fingerprint,
+            scope: payload.review.scope,
+            provider: payload.review.provider,
+            model: payload.review.model,
+            summary: payload.review.summary,
+            findingCount: payload.findings.length
+          },
+          update: {
+            scope: payload.review.scope,
+            provider: payload.review.provider,
+            model: payload.review.model,
+            summary: payload.review.summary,
+            findingCount: payload.findings.length
+          },
+          include: {
+            findings: true,
+            analyzerSignals: true,
+            modelUsage: true
+          }
+        });
+
+        await context.db.finding.deleteMany({
+          where: { reviewId: review.id }
+        });
+
+        await context.db.analyzerSignal.deleteMany({
+          where: { reviewId: review.id }
+        });
+
+        await context.db.modelUsage.deleteMany({
+          where: { reviewId: review.id }
+        });
+
+        if (payload.findings.length > 0) {
+          await context.db.finding.createMany({
+            data: payload.findings.map((f) => ({
+              reviewId: review.id,
+              ruleId: f.ruleId,
+              message: f.message,
+              severity: f.severity,
+              file: f.file,
+              lineStart: f.lineStart,
+              lineEnd: f.lineEnd,
+              fingerprint: f.fingerprint,
+              confidence: f.confidence
+            }))
+          });
+        }
+
+        if (payload.analyzerSignals && payload.analyzerSignals.length > 0) {
+          await context.db.analyzerSignal.createMany({
+            data: payload.analyzerSignals.map((s) => ({
+              reviewId: review.id,
+              analyzer: s.analyzer,
+              ruleId: s.ruleId,
+              message: s.message,
+              severity: s.severity,
+              file: s.file,
+              lineStart: s.lineStart,
+              lineEnd: s.lineEnd
+            }))
+          });
+        }
+
+        if (payload.modelUsage) {
+          await context.db.modelUsage.create({
+            data: {
+              reviewId: review.id,
+              provider: payload.modelUsage.provider,
+              model: payload.modelUsage.model,
+              inputTokens: payload.modelUsage.inputTokens,
+              outputTokens: payload.modelUsage.outputTokens,
+              estimatedCostUsd: payload.modelUsage.estimatedCostUsd
+            }
+          });
+        }
+
+        await context.db.apiKey.update({
+          where: { id: apiKey.id },
+          data: { lastUsedAt: new Date() }
+        });
+
+        await context.db.auditEvent.create({
+          data: {
+            orgId: apiKey.orgId,
+            action: "review.ingested",
+            resource: "review",
+            resourceId: review.id,
+            details: JSON.stringify({
+              repo: payload.repository.fullName,
+              findings: payload.findings.length,
+              cost: estimatedCost
+            })
+          }
+        });
+
+        reply.status(201).send({
+          success: true,
+          reviewId: review.id,
+          message: `Review ingested with ${payload.findings.length} finding(s)`
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          reply.status(400).send({
+            success: false,
+            reviewId: "",
+            message: `Validation error: ${error.errors.map((e) => e.message).join(", ")}`
+          });
+          return;
+        }
+
+        fastify.log.error(error);
+        reply.status(500).send({
+          success: false,
+          reviewId: "",
+          message: "Failed to ingest review"
+        });
+      }
+    }
+  );
+}
