@@ -2,14 +2,58 @@
   "name": "@m-rithik/hubolt",
   "version": "0.1.0",
   "description": "Context-aware AI code review assistant that is local-first, not local-only.",
+  "license": "Apache-2.0",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "hubolt": "dist/cli/index.js"
   },
+  "files": [
+    "dist/",
+    "prisma/schema.prisma",
+    "prisma/migrations/",
+    "docs/",
+    ".hubolt.example.yml",
+    "docker-compose.yml"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m-rithik/hubolt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/m-rithik/hubolt/issues"
+  },
+  "homepage": "https://github.com/m-rithik/hubolt#readme",
+  "keywords": [
+    "ai",
+    "code-review",
+    "github",
+    "cli",
+    "security",
+    "llm",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
-    "prebuild": "npx prisma generate",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "prebuild": "npm run clean && npx prisma generate",
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "chmod +x dist/cli/index.js",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm audit --omit=dev",
     "dev": "tsx src/cli/index.ts",
     "dev:server": "tsx src/server/index.ts",
     "server": "node dist/server/index.js",

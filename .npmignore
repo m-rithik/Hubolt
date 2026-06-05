@@ -1,0 +1,53 @@
+# Source and tests
+src/
+test/
+examples/
+
+# Local configuration and secrets
+.env
+.env.*
+.hubolt/
+.hubolt.yml
+~/.hubolt/
+
+# Agent and planning docs
+AGENTS.md
+CLAUDE.md
+PLAN.md
+Info.md
+.cursor/
+.github/copilot-instructions.md
+
+# GitHub development files
+.github/workflows/
+.github/actions/
+
+# Build, cache, and generated package files
+node_modules/
+coverage/
+.nyc_output/
+.vitest/
+.cache/
+.turbo/
+.vite/
+build/
+*.tsbuildinfo
+*.tgz
+
+# Logs and generated reports
+logs/
+*.log
+*.report.json
+*.report.md
+report.json
+report.md
+
+# Local database artifacts
+prisma/*.db
+prisma/migrations/dev/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

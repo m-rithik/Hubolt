@@ -7,6 +7,7 @@ import { buildAnalyzerContext, runAnalyzers, selectAnalyzers } from "../../core/
 import type { SkippedAnalyzer } from "../../core/analyze.js";
 import { assertSafeCacheDir, createFileCache, createNoopCache, defaultCacheDir, type Cache } from "../../core/cache.js";
 import { buildContext, type BuiltContext, type ReviewFile } from "../../core/context-builder.js";
+import { buildSingleFileContext } from "../../core/single-file-reviewer.js";
 import { createJsonlEventLog, defaultEventLogPath } from "../../core/event-log.js";
 import { InProcessReviewEventEmitter } from "../../core/events.js";
 import { getGitRoot, isGitRepository } from "../../core/git.js";
@@ -39,6 +40,7 @@ interface ReviewOptions {
   ci?: boolean;
   json?: string;
   md?: string;
+  filepath?: string;
 }
 
 /** Analyzer-only provider used by --no-llm: contributes no LLM findings. */
@@ -56,8 +58,8 @@ interface RunOptions {
 
 export function registerReviewCommand(program: Command): void {
   program
-    .command("review")
-    .description("Review the current local changes with the configured LLM provider.")
+    .command("review [filepath]")
+    .description("Review the current local changes or a specific file with the configured LLM provider.")
     .option("--staged", "review staged changes instead of the working tree")
     .option("--base <ref>", "base ref for a commit-range review (requires --head)")
     .option("--head <ref>", "head ref for a commit-range review (requires --base)")
@@ -71,8 +73,8 @@ export function registerReviewCommand(program: Command): void {
     .option("--json <path>", "write a JSON report to this path")
     .option("--md <path>", "write a Markdown report to this path")
     .option("-c, --config <path>", "path to a Hubolt config file")
-    .action((options: ReviewOptions) => {
-      return runSafelyAsync(() => runReview(options));
+    .action((filepath: string | undefined, options: ReviewOptions) => {
+      return runSafelyAsync(() => runReview({ ...options, filepath }));
     });
 }
 
@@ -133,13 +135,15 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
   const providerName = options.provider ?? settings.llmProvider;
   const modelName = options.model ?? settings.llmModel;
   const providerLabel = useLlm ? `${providerName} (${modelName})` : "none (analyzers only)";
-  const context = await buildContext({
-    cwd: repo,
-    staged: options.staged,
-    base: options.base,
-    head: options.head,
-    config: settings.repo
-  });
+  const context = options.filepath
+    ? buildSingleFileContext({ filepath: options.filepath, cwd: repo })
+    : await buildContext({
+        cwd: repo,
+        staged: options.staged,
+        base: options.base,
+        head: options.head,
+        config: settings.repo
+      });
 
   if (options.showContext) {
     printContext(context);
