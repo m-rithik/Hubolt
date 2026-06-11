@@ -12,9 +12,25 @@ const ListReviewsQuerySchema = z.object({
   sortOrder: z.enum(["asc", "desc"]).default("desc")
 });
 
+const BooleanQuerySchema = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value.toLowerCase();
+  if (normalized === "true") {
+    return true;
+  }
+  if (normalized === "false") {
+    return false;
+  }
+
+  return value;
+}, z.boolean());
+
 const GetReviewQuerySchema = z.object({
-  includeFindings: z.coerce.boolean().default(true),
-  includeSignals: z.coerce.boolean().default(true)
+  includeFindings: BooleanQuerySchema.default(true),
+  includeSignals: BooleanQuerySchema.default(true)
 });
 
 interface ListReviewsResponse {
@@ -162,8 +178,14 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         const { id } = request.params as { id: string };
         const query = GetReviewQuerySchema.parse(request.query);
 
-        const review = await context.db.review.findUnique({
-          where: { id },
+        // Scope the lookup by org in the query itself so callers from another
+        // org receive the same 404 whether or not the review exists. Checking
+        // ownership after the fetch would leak review IDs across orgs.
+        const review = await context.db.review.findFirst({
+          where: {
+            id,
+            repo: { orgId: request.orgId }
+          },
           include: {
             repo: true,
             findings: query.includeFindings,
@@ -178,11 +200,6 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         }
 
         const reviewData = review as any;
-
-        if (reviewData.repo.orgId !== request.orgId) {
-          reply.status(403).send({ error: "Forbidden" });
-          return;
-        }
 
         const response: GetReviewResponse = {
           id: reviewData.id,

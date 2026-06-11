@@ -1,7 +1,9 @@
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LLMProvider, LLMProviderOptions } from "../../types/providers.js";
 import { createAiSdkProvider } from "./ai-sdk.js";
 
 export function makeGoogleProvider(options: LLMProviderOptions): LLMProvider {
-  return createAiSdkProvider("google", google(options.model));
+  const config = options.apiKey ? { apiKey: options.apiKey } : undefined;
+  const googleClient = createGoogleGenerativeAI(config);
+  return createAiSdkProvider("google", googleClient(options.model));
 }

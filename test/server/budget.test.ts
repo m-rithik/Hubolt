@@ -1,7 +1,11 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { BudgetService } from "../../src/server/services/budget.js";
 
 describe("BudgetService", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   test("reserves usage with an atomic transaction", async () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValueOnce([{ requestCount: 1, maxRequestsPerDay: 1000 }]),
@@ -100,5 +104,62 @@ describe("BudgetService", () => {
     });
     expect(upsert.mock.calls[0][0].where.orgId_provider_model_windowStart.windowStart).toBeInstanceOf(Date);
     expect(upsert.mock.calls[0][0].create.windowStart).toBeInstanceOf(Date);
+  });
+
+  test("clamps refunded usage at zero in the database", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(1);
+    const service = new BudgetService({
+      $executeRaw: executeRaw
+    } as any);
+
+    await service.refundUsage("org_1", "openai", 5);
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(String(executeRaw.mock.calls[0][0])).toContain("GREATEST");
+  });
+
+  test("budget checks reset to the first day of the next UTC month", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-31T12:00:00Z"));
+
+    const update = vi.fn().mockResolvedValue({
+      id: "budget_1",
+      currentMonthCostUsd: 0,
+      monthlyLimitUsd: 100,
+      alertThresholdPct: 80,
+      currentMonthResets: new Date("2026-02-01T00:00:00Z")
+    });
+    const service = new BudgetService({
+      budget: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "budget_1",
+          currentMonthCostUsd: 20,
+          monthlyLimitUsd: 100,
+          alertThresholdPct: 80,
+          currentMonthResets: new Date("2026-01-01T00:00:00Z")
+        }),
+        update
+      }
+    } as any);
+
+    await service.checkBudget("org_1", "openai", 1);
+
+    expect(update.mock.calls[0][0].data.currentMonthResets.toISOString()).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  test("manual monthly resets use the first day of the next UTC month", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-31T12:00:00Z"));
+
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const service = new BudgetService({
+      budget: {
+        updateMany
+      }
+    } as any);
+
+    await service.resetMonthlyBudgets("org_1");
+
+    expect(updateMany.mock.calls[0][0].data.currentMonthResets.toISOString()).toBe("2026-02-01T00:00:00.000Z");
   });
 });

@@ -11,6 +11,7 @@ export interface LLMReviewRequest {
 
 export interface LLMProviderOptions {
   model: string;
+  apiKey?: string;
 }
 
 export interface LLMProvider {

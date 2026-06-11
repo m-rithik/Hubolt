@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from "fastify";
-import { PrismaClient } from "../../generated/prisma/client.js";
+import { PrismaClient } from "../../generated/prisma/index.js";
 import { hashApiKey } from "../api-keys.js";
 
 export interface AuthenticatedRequest extends FastifyRequest {
@@ -36,15 +36,21 @@ export function createAuthMiddleware(db: PrismaClient) {
 
       request.apiKey = key;
       request.orgId = apiKey.orgId;
-
-      await db.apiKey.update({
-        where: { id: apiKey.id },
-        data: { lastUsedAt: new Date() }
-      });
     } catch (error) {
       request.server.log.error(error);
       reply.status(500).send({ error: "Authentication failed" });
       return;
+    }
+
+    // lastUsedAt is bookkeeping; a failure here must not reject a request
+    // that has already authenticated successfully.
+    try {
+      await db.apiKey.update({
+        where: { keyHash: hashApiKey(key) },
+        data: { lastUsedAt: new Date() }
+      });
+    } catch (error) {
+      request.server.log.error(error);
     }
   };
 }

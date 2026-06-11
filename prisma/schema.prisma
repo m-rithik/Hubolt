@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../src/generated/prisma"
 }
 
@@ -14,10 +14,11 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  repos    Repository[]
-  members  OrganizationMember[]
-  budgets  Budget[]
-  apiKeys  ApiKey[]
+  repos               Repository[]
+  members             OrganizationMember[]
+  budgets             Budget[]
+  apiKeys             ApiKey[]
+  providerCredentials ProviderCredential[]
 
   @@map("organizations")
 }
@@ -190,6 +191,9 @@ model Budget {
   @@map("budgets")
 }
 
+// PostgreSQL CHECK constraint handled in migration
+// currentMonthCostUsd >= 0
+
 model AuditEvent {
   id    String @id @default(cuid())
   orgId String
@@ -218,4 +222,76 @@ model RateLimitWindow {
 
   @@unique([orgId, provider, model, windowStart])
   @@map("rate_limit_windows")
+}
+
+model ProviderCredential {
+  id    String @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  provider       String
+  keyHash        String @db.VarChar(100)
+  encryptedKey   String
+  lastUsedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([orgId, provider])
+  @@index([keyHash])
+  @@map("provider_credentials")
+}
+
+model ModelRoute {
+  id    String @id @default(cuid())
+  orgId String
+
+  reviewScope String
+  provider    String
+  model       String
+  priority    Int @default(0)
+  costLimit   Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, reviewScope, provider])
+  @@map("model_routes")
+}
+
+model GatewayLog {
+  id    String @id @default(cuid())
+  orgId String
+
+  provider           String
+  model              String
+  promptTokens       Int
+  completionTokens   Int
+  estimatedCostUsd   Float
+  cachedResponse     Boolean @default(false)
+  duration_ms        Int
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId])
+  @@index([createdAt])
+  @@map("gateway_logs")
+}
+
+model GatewayBudgetReservation {
+  id    String @id @default(cuid())
+  jobId String @unique
+  orgId String
+
+  provider         String
+  estimatedCostUsd Float
+  actualCostUsd    Float?
+  status           String @default("reserved")
+  settledAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([status])
+  @@map("gateway_budget_reservations")
 }

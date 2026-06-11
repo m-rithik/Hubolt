@@ -59,19 +59,66 @@ async function runServer(options: ServerOptions): Promise<void> {
   process.env.HOST = options.host || process.env.HOST || "127.0.0.1";
 
   const { createApp } = await import("../../server/app.js");
-  const { createPrismaClient } = await import("../../server/db.js");
+  const { createPrismaClient, disconnectPrismaClient } = await import("../../server/db.js");
+  const { createRedisClient, connectRedis, disconnectRedis } = await import("../../server/redis.js");
 
   const db = createPrismaClient();
+  let redis: any = null;
+  let app: Awaited<ReturnType<typeof createApp>> | null = null;
 
   try {
     await db.$connect();
     console.log("Connected to database");
 
-    const app = await createApp({ db });
+    redis = createRedisClient();
+    try {
+      await connectRedis(redis);
+      console.log("Connected to Redis");
+    } catch (error) {
+      console.warn("Redis connection failed, LLM Gateway will be disabled:", error instanceof Error ? error.message : error);
+      try {
+        await disconnectRedis(redis);
+      } catch (disconnectError) {
+        console.error("Failed to disconnect Redis after connection failure:", disconnectError);
+      }
+      redis = null;
+    }
+
+    app = await createApp({ db, redis });
     const address = await app.listen({ port, host: process.env.HOST });
     console.log(`Server listening at ${address}`);
+
+    const shutdown = async (signal: string): Promise<void> => {
+      console.log(`Received ${signal}, shutting down...`);
+      if (app) {
+        await app.close();
+      }
+      if (redis) {
+        await disconnectRedis(redis);
+      }
+      await disconnectPrismaClient(db);
+      process.exit(0);
+    };
+
+    process.once("SIGINT", () => {
+      void shutdown("SIGINT");
+    });
+    process.once("SIGTERM", () => {
+      void shutdown("SIGTERM");
+    });
   } catch (error) {
     console.error("Failed to start server:", error);
+    if (app) {
+      await app.close();
+    }
+    if (redis) {
+      try {
+        await disconnectRedis(redis);
+      } catch (disconnectError) {
+        console.error("Failed to disconnect Redis:", disconnectError);
+      }
+    }
+    await disconnectPrismaClient(db);
     process.exit(1);
   }
 }
@@ -85,7 +132,7 @@ async function bootstrapServer(options: BootstrapOptions): Promise<void> {
   const key = generateApiKey();
   const serverUrl = normalizeServerUrl(resolved.serverUrl);
 
-  const { createPrismaClient } = await import("../../server/db.js");
+  const { createPrismaClient, disconnectPrismaClient } = await import("../../server/db.js");
   const db = createPrismaClient();
 
   try {
@@ -162,7 +209,7 @@ async function bootstrapServer(options: BootstrapOptions): Promise<void> {
       console.log(`API key:      ${key}`);
     }
   } finally {
-    await db.$disconnect();
+    await disconnectPrismaClient(db);
   }
 }
 

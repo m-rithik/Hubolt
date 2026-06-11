@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { PrismaClient } from "../../generated/prisma/client.js";
+import { PrismaClient } from "../../generated/prisma/index.js";
+
+type BudgetDbClient = Pick<PrismaClient, "$executeRaw" | "budget" | "auditEvent">;
 
 export interface BudgetCheckResult {
   allowed: boolean;
@@ -160,10 +162,7 @@ export class BudgetService {
 
     const now = new Date();
     if (now >= budget.currentMonthResets) {
-      const nextMonth = new Date(now);
-      nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
-      nextMonth.setUTCDate(1);
-      nextMonth.setUTCHours(0, 0, 0, 0);
+      const nextMonth = startOfNextUtcMonth(now);
 
       budget = await this.db.budget.update({
         where: { id: budget.id },
@@ -200,13 +199,14 @@ export class BudgetService {
   async deductBudget(
     orgId: string,
     provider: string,
-    costUsd: number
+    costUsd: number,
+    db: BudgetDbClient = this.db
   ): Promise<void> {
     if (costUsd <= 0) {
       return;
     }
 
-    const budget = await this.db.budget.findUnique({
+    const budget = await db.budget.findUnique({
       where: { orgId_provider: { orgId, provider } }
     });
 
@@ -214,12 +214,12 @@ export class BudgetService {
       return;
     }
 
-    await this.db.budget.update({
+    await db.budget.update({
       where: { orgId_provider: { orgId, provider } },
       data: { currentMonthCostUsd: { increment: costUsd } }
     });
 
-    const updated = await this.db.budget.findUnique({
+    const updated = await db.budget.findUnique({
       where: { orgId_provider: { orgId, provider } }
     });
 
@@ -227,7 +227,7 @@ export class BudgetService {
       updated &&
       updated.currentMonthCostUsd > budget.monthlyLimitUsd * (budget.alertThresholdPct / 100)
     ) {
-      await this.db.auditEvent.create({
+      await db.auditEvent.create({
         data: {
           orgId,
           action: "budget.alert",
@@ -320,12 +320,29 @@ export class BudgetService {
     });
   }
 
+  async refundUsage(
+    orgId: string,
+    provider: string,
+    costUsd: number,
+    db: Pick<PrismaClient, "$executeRaw"> = this.db
+  ): Promise<void> {
+    if (costUsd <= 0) return;
+
+    const refund = Math.min(costUsd, 999999999);
+    const now = new Date();
+
+    await db.$executeRaw`
+      UPDATE "budgets"
+      SET "currentMonthCostUsd" = GREATEST(0, "currentMonthCostUsd" - ${refund}),
+          "updatedAt" = ${now}
+      WHERE "orgId" = ${orgId}
+        AND "provider" = ${provider}
+    `;
+  }
+
   async resetMonthlyBudgets(orgId: string): Promise<void> {
     const now = new Date();
-    const nextMonth = new Date(now);
-    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
-    nextMonth.setUTCDate(1);
-    nextMonth.setUTCHours(0, 0, 0, 0);
+    const nextMonth = startOfNextUtcMonth(now);
 
     await this.db.budget.updateMany({
       where: { orgId },

@@ -6,7 +6,7 @@ export interface ProviderInfo {
 }
 
 export const DEFAULT_LLM_PROVIDER_ID = "openai";
-export const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 export const DEFAULT_LLM_MODEL = DEFAULT_OPENAI_MODEL;
 
 /**

@@ -234,7 +234,7 @@ maxFileSizeKb: 256
 
 providers:
   llm: openai
-  model: gpt-4.1-mini
+  model: gpt-4o-mini
 
 privacy:
   redactSecrets: true
@@ -284,7 +284,7 @@ Machine secrets stay outside the repository:
 ```bash
 OPENAI_API_KEY=...
 HUBOLT_LLM_PROVIDER=openai
-HUBOLT_LLM_MODEL=gpt-4.1-mini
+HUBOLT_LLM_MODEL=gpt-4o-mini
 HUBOLT_REVIEW_CONCURRENCY=4
 ```
 

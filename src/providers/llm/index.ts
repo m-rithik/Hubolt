@@ -5,6 +5,7 @@ import { registerLLMProvider } from "./registry.js";
 
 registerLLMProvider("openai", makeOpenAIProvider);
 registerLLMProvider("claude", makeClaudeProvider);
+registerLLMProvider("anthropic", makeClaudeProvider);
 registerLLMProvider("google", makeGoogleProvider);
 
 export { getLLMProvider, listLLMProviders, registerLLMProvider } from "./registry.js";

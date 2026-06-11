@@ -89,6 +89,10 @@ export const LLMRangeSchema = z
     startLine: z.number().int(),
     endLine: z.number().int()
   })
+  .refine((range) => range.file.trim().length > 0, {
+    message: "file must be a non-empty path",
+    path: ["file"]
+  })
   .refine((range) => RangeValidators.isValidLineRange(range.startLine, range.endLine), {
     message: RangeValidators.lineRangeMessage(),
     path: ["startLine"]

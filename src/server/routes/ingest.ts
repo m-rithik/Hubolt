@@ -65,6 +65,8 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
   fastify.post<{ Body: IngestPayload; Reply: IngestResponse }>(
     "/ingest/review",
     async (request, reply) => {
+      let reservedUsage: { orgId: string; provider: string; costUsd: number } | null = null;
+
       try {
         const payload = IngestPayloadSchema.parse(request.body);
 
@@ -82,26 +84,18 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
           return;
         }
 
-        const provider = payload.modelUsage?.provider || payload.review.provider;
-        const model = payload.modelUsage?.model || payload.review.model;
-
-        const estimatedCost = payload.modelUsage?.estimatedCostUsd || 0;
-
-        const reservation = await budgetService.reserveUsage(
-          apiKey.orgId,
-          provider,
-          model,
-          estimatedCost
-        );
-
-        if (!reservation.allowed) {
-          reply.status(reservation.statusCode ?? 429).send({
+        if (apiKey.expiresAt && apiKey.expiresAt < new Date()) {
+          reply.status(401).send({
             success: false,
             reviewId: "",
-            message: reservation.reason ?? "Usage limit exceeded"
+            message: "API key expired"
           });
           return;
         }
+
+        const provider = payload.modelUsage?.provider || payload.review.provider;
+        const model = payload.modelUsage?.model || payload.review.model;
+        const estimatedCost = payload.modelUsage?.estimatedCostUsd || 0;
 
         const repo = await context.db.repository.upsert({
           where: { orgId_fullName: { orgId: apiKey.orgId, fullName: payload.repository.fullName } },
@@ -117,105 +111,139 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
           }
         });
 
-        const review = await context.db.review.upsert({
+        const existingReview = await context.db.review.findUnique({
           where: { repoId_fingerprint: { repoId: repo.id, fingerprint: payload.review.fingerprint } },
-          create: {
-            repoId: repo.id,
-            fingerprint: payload.review.fingerprint,
-            scope: payload.review.scope,
-            provider: payload.review.provider,
-            model: payload.review.model,
-            summary: payload.review.summary,
-            findingCount: payload.findings.length
-          },
-          update: {
-            scope: payload.review.scope,
-            provider: payload.review.provider,
-            model: payload.review.model,
-            summary: payload.review.summary,
-            findingCount: payload.findings.length
-          },
-          include: {
-            findings: true,
-            analyzerSignals: true,
-            modelUsage: true
+          select: { id: true }
+        });
+
+        if (!existingReview) {
+          const reservation = await budgetService.reserveUsage(
+            apiKey.orgId,
+            provider,
+            model,
+            estimatedCost
+          );
+
+          if (!reservation.allowed) {
+            reply.status(reservation.statusCode ?? 429).send({
+              success: false,
+              reviewId: "",
+              message: reservation.reason ?? "Usage limit exceeded"
+            });
+            return;
           }
-        });
 
-        await context.db.finding.deleteMany({
-          where: { reviewId: review.id }
-        });
-
-        await context.db.analyzerSignal.deleteMany({
-          where: { reviewId: review.id }
-        });
-
-        await context.db.modelUsage.deleteMany({
-          where: { reviewId: review.id }
-        });
-
-        if (payload.findings.length > 0) {
-          await context.db.finding.createMany({
-            data: payload.findings.map((f) => ({
-              reviewId: review.id,
-              ruleId: f.ruleId,
-              message: f.message,
-              severity: f.severity,
-              file: f.file,
-              lineStart: f.lineStart,
-              lineEnd: f.lineEnd,
-              fingerprint: f.fingerprint,
-              confidence: f.confidence
-            }))
-          });
+          reservedUsage = { orgId: apiKey.orgId, provider, costUsd: estimatedCost };
         }
 
-        if (payload.analyzerSignals && payload.analyzerSignals.length > 0) {
-          await context.db.analyzerSignal.createMany({
-            data: payload.analyzerSignals.map((s) => ({
-              reviewId: review.id,
-              analyzer: s.analyzer,
-              ruleId: s.ruleId,
-              message: s.message,
-              severity: s.severity,
-              file: s.file,
-              lineStart: s.lineStart,
-              lineEnd: s.lineEnd
-            }))
-          });
-        }
-
-        if (payload.modelUsage) {
-          await context.db.modelUsage.create({
-            data: {
-              reviewId: review.id,
-              provider: payload.modelUsage.provider,
-              model: payload.modelUsage.model,
-              inputTokens: payload.modelUsage.inputTokens,
-              outputTokens: payload.modelUsage.outputTokens,
-              estimatedCostUsd: payload.modelUsage.estimatedCostUsd
+        // Write the review and its child rows atomically. Without the
+        // transaction a mid-sequence failure could leave a review whose
+        // findings were deleted but never re-created.
+        const review = await context.db.$transaction(async (tx) => {
+          const upserted = await tx.review.upsert({
+            where: { repoId_fingerprint: { repoId: repo.id, fingerprint: payload.review.fingerprint } },
+            create: {
+              repoId: repo.id,
+              fingerprint: payload.review.fingerprint,
+              scope: payload.review.scope,
+              provider: payload.review.provider,
+              model: payload.review.model,
+              summary: payload.review.summary,
+              findingCount: payload.findings.length
+            },
+            update: {
+              scope: payload.review.scope,
+              provider: payload.review.provider,
+              model: payload.review.model,
+              summary: payload.review.summary,
+              findingCount: payload.findings.length
             }
           });
-        }
 
-        await context.db.apiKey.update({
-          where: { id: apiKey.id },
-          data: { lastUsedAt: new Date() }
-        });
+          await tx.finding.deleteMany({
+            where: { reviewId: upserted.id }
+          });
 
-        await context.db.auditEvent.create({
-          data: {
-            orgId: apiKey.orgId,
-            action: "review.ingested",
-            resource: "review",
-            resourceId: review.id,
-            details: JSON.stringify({
-              repo: payload.repository.fullName,
-              findings: payload.findings.length,
-              cost: estimatedCost
-            })
+          await tx.analyzerSignal.deleteMany({
+            where: { reviewId: upserted.id }
+          });
+
+          await tx.modelUsage.deleteMany({
+            where: { reviewId: upserted.id }
+          });
+
+          if (payload.findings.length > 0) {
+            await tx.finding.createMany({
+              data: payload.findings.map((f) => ({
+                reviewId: upserted.id,
+                ruleId: f.ruleId,
+                message: f.message,
+                severity: f.severity,
+                file: f.file,
+                lineStart: f.lineStart,
+                lineEnd: f.lineEnd,
+                fingerprint: f.fingerprint,
+                confidence: f.confidence
+              }))
+            });
           }
+
+          if (payload.analyzerSignals && payload.analyzerSignals.length > 0) {
+            await tx.analyzerSignal.createMany({
+              data: payload.analyzerSignals.map((s) => ({
+                reviewId: upserted.id,
+                analyzer: s.analyzer,
+                ruleId: s.ruleId,
+                message: s.message,
+                severity: s.severity,
+                file: s.file,
+                lineStart: s.lineStart,
+                lineEnd: s.lineEnd
+              }))
+            });
+          }
+
+          if (payload.modelUsage) {
+            await tx.modelUsage.create({
+              data: {
+                reviewId: upserted.id,
+                provider: payload.modelUsage.provider,
+                model: payload.modelUsage.model,
+                inputTokens: payload.modelUsage.inputTokens,
+                outputTokens: payload.modelUsage.outputTokens,
+                estimatedCostUsd: payload.modelUsage.estimatedCostUsd
+              }
+            });
+          }
+
+          return upserted;
         });
+
+        // The review is durable past this point. Bookkeeping failures are
+        // logged but must not fail the request or trigger a refund, since the
+        // ingested review exists and its cost was genuinely consumed.
+        try {
+          await context.db.apiKey.update({
+            where: { id: apiKey.id },
+            data: { lastUsedAt: new Date() }
+          });
+
+          await context.db.auditEvent.create({
+            data: {
+              orgId: apiKey.orgId,
+              action: "review.ingested",
+              resource: "review",
+              resourceId: review.id,
+              details: JSON.stringify({
+                repo: payload.repository.fullName,
+                findings: payload.findings.length,
+                cost: estimatedCost
+              })
+            }
+          });
+        } catch (bookkeepingError) {
+          fastify.log.error(bookkeepingError);
+        }
 
         reply.status(201).send({
           success: true,
@@ -233,6 +261,14 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
         }
 
         fastify.log.error(error);
+        if (reservedUsage) {
+          try {
+            await budgetService.refundUsage(reservedUsage.orgId, reservedUsage.provider, reservedUsage.costUsd);
+          } catch (refundError) {
+            fastify.log.error(refundError);
+          }
+        }
+
         reply.status(500).send({
           success: false,
           reviewId: "",

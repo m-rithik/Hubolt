@@ -90,7 +90,10 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
           monthlyLimitUsd: budget.monthlyLimitUsd,
           alertThresholdPct: budget.alertThresholdPct,
           currentMonthCostUsd: budget.currentMonthCostUsd,
-          percentageUsed: (budget.currentMonthCostUsd / budget.monthlyLimitUsd) * 100,
+          percentageUsed:
+            budget.monthlyLimitUsd > 0
+              ? (budget.currentMonthCostUsd / budget.monthlyLimitUsd) * 100
+              : 0,
           createdAt: budget.createdAt.toISOString(),
           updatedAt: budget.updatedAt.toISOString()
         };
@@ -115,10 +118,8 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
       try {
         const body = CreateBudgetSchema.parse(request.body);
 
-        const nextMonth = new Date();
-        nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
-        nextMonth.setUTCDate(1);
-        nextMonth.setUTCHours(0, 0, 0, 0);
+        const now = new Date();
+        const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
         const budget = await context.db.budget.upsert({
           where: { orgId_provider: { orgId: request.orgId!, provider: body.provider } },
@@ -155,7 +156,10 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
           monthlyLimitUsd: budget.monthlyLimitUsd,
           alertThresholdPct: budget.alertThresholdPct,
           currentMonthCostUsd: budget.currentMonthCostUsd,
-          percentageUsed: (budget.currentMonthCostUsd / budget.monthlyLimitUsd) * 100,
+          percentageUsed:
+            budget.monthlyLimitUsd > 0
+              ? (budget.currentMonthCostUsd / budget.monthlyLimitUsd) * 100
+              : 0,
           createdAt: budget.createdAt.toISOString(),
           updatedAt: budget.updatedAt.toISOString()
         };
@@ -225,7 +229,10 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
           monthlyLimitUsd: updated.monthlyLimitUsd,
           alertThresholdPct: updated.alertThresholdPct,
           currentMonthCostUsd: updated.currentMonthCostUsd,
-          percentageUsed: (updated.currentMonthCostUsd / updated.monthlyLimitUsd) * 100,
+          percentageUsed:
+            updated.monthlyLimitUsd > 0
+              ? (updated.currentMonthCostUsd / updated.monthlyLimitUsd) * 100
+              : 0,
           createdAt: updated.createdAt.toISOString(),
           updatedAt: updated.updatedAt.toISOString()
         };
