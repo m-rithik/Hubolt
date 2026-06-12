@@ -6,7 +6,17 @@ import { parseUnifiedDiff, type ChangedRange } from "./diff.js";
 import { getChangedFiles, getDiffText, gitFileContent, gitFileSize, type ChangeStatus, type ChangedFilesOptions } from "./git.js";
 import { mapChangedRegions, type SemanticRegion } from "./semantic-map.js";
 
-export type SkipReason = "deleted" | "ignored" | "too-large" | "unreadable";
+export type SkipReason = "deleted" | "ignored" | "too-large" | "unreadable" | "over-budget";
+
+/**
+ * Matches the gateway's estimator: ~4 bytes of source per token. Used to
+ * enforce config.maxContextTokens across the whole context, not per file.
+ */
+const BYTES_PER_TOKEN = 4;
+
+export function estimateTokensFromBytes(bytes: number): number {
+  return Math.ceil(bytes / BYTES_PER_TOKEN);
+}
 
 export interface ReviewFile {
   path: string;
@@ -56,6 +66,12 @@ export async function buildContext(options: BuildContextOptions): Promise<BuiltC
   const isIgnored = config.ignore.length > 0 ? picomatch(config.ignore, { dot: true }) : () => false;
   const maxBytes = config.maxFileSizeKb * 1024;
 
+  // Total context budget. Greedy first-fit in change order: a file that does
+  // not fit is skipped, but smaller files after it may still use the
+  // remaining budget. Without this cap a many-file change ships the model an
+  // unbounded prompt (and an unbounded bill).
+  let remainingTokens = config.maxContextTokens;
+
   const files: ReviewFile[] = [];
   for (const file of changed) {
     const changedRanges = rangesByPath.get(file.path) ?? [];
@@ -82,6 +98,10 @@ export async function buildContext(options: BuildContextOptions): Promise<BuiltC
           files.push({ path: file.path, status: file.status, changedRanges, skipped: "too-large" });
           continue;
         }
+        if (estimateTokensFromBytes(gitSize) > remainingTokens) {
+          files.push({ path: file.path, status: file.status, changedRanges, skipped: "over-budget" });
+          continue;
+        }
       } else {
         try {
           const stat = statSync(absolute);
@@ -94,18 +114,29 @@ export async function buildContext(options: BuildContextOptions): Promise<BuiltC
             files.push({ path: file.path, status: file.status, changedRanges, skipped: "too-large" });
             continue;
           }
+          if (estimateTokensFromBytes(stat.size) > remainingTokens) {
+            files.push({ path: file.path, status: file.status, changedRanges, skipped: "over-budget" });
+            continue;
+          }
         } catch {
           // statSync failed — fall through; readFileSync will fail too and mark unreadable.
         }
       }
 
       const content = gitFileContent(file.path, options) ?? readFileSync(absolute, "utf8");
-      // Secondary check: catches the rare case where gitFileSize returned null
-      // in git mode (e.g., cat-file unavailable) but content still loaded.
-      if (Buffer.byteLength(content, "utf8") > maxBytes) {
+      const contentBytes = Buffer.byteLength(content, "utf8");
+      // Secondary checks: cover the rare case where no pre-load size was
+      // available (e.g., cat-file unavailable) but content still loaded.
+      if (contentBytes > maxBytes) {
         files.push({ path: file.path, status: file.status, changedRanges, skipped: "too-large" });
         continue;
       }
+      const contentTokens = estimateTokensFromBytes(contentBytes);
+      if (contentTokens > remainingTokens) {
+        files.push({ path: file.path, status: file.status, changedRanges, skipped: "over-budget" });
+        continue;
+      }
+      remainingTokens -= contentTokens;
 
       const regions = await mapChangedRegions(content, file.path, changedRanges);
       files.push({ path: file.path, status: file.status, changedRanges, content, regions });

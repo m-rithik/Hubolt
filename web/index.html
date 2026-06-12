@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hubolt Control Panel</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <aside class="sidebar" id="sidebar" hidden>
+      <div class="wordmark">
+        <span class="wordmark-dot"></span>
+        <span class="wordmark-text">hubolt</span>
+      </div>
+      <nav class="nav" id="nav" aria-label="Sections"></nav>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </aside>
+    <main class="main">
+      <header class="topbar" id="topbar" hidden>
+        <div>
+          <h1 class="page-title" id="page-title"></h1>
+          <p class="page-desc" id="page-desc"></p>
+        </div>
+        <div class="topbar-status" id="topbar-status"></div>
+      </header>
+      <div class="view" id="view"></div>
+    </main>
+  </div>
+  <script type="module" src="/ui/js/app.js"></script>
+</body>
+</html>

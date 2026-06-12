@@ -81,10 +81,27 @@ model Repository {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  reviews Review[]
+  reviews           Review[]
+  pullRequestStates PullRequestState[]
 
   @@unique([orgId, fullName])
+  @@index([fullName])
   @@map("repositories")
+}
+
+model PullRequestState {
+  id     String @id @default(cuid())
+  repoId String
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  prNumber Int
+  headSha  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repoId, prNumber])
+  @@map("pull_request_states")
 }
 
 model Review {
@@ -207,6 +224,7 @@ model AuditEvent {
 
   @@index([orgId])
   @@index([createdAt])
+  @@index([orgId, createdAt])
   @@map("audit_events")
 }
 

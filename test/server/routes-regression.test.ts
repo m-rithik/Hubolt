@@ -186,6 +186,68 @@ describe("server route regressions", () => {
     await app.close();
   });
 
+  test("duplicate finding fingerprints are deduped instead of failing ingest", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      $transaction: vi.fn(),
+      $executeRaw: vi.fn(),
+      $queryRaw: vi.fn(),
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue(authApiKey()),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      repository: {
+        upsert: vi.fn().mockResolvedValue({ id: "repo_1" })
+      },
+      review: {
+        findUnique: vi.fn().mockResolvedValue({ id: "review_1" }),
+        upsert: vi.fn().mockResolvedValue({ id: "review_1", repoId: "repo_1", fingerprint: "review_fp" })
+      },
+      finding: {
+        deleteMany: vi.fn().mockResolvedValue(undefined),
+        createMany: vi.fn().mockResolvedValue(undefined)
+      },
+      analyzerSignal: {
+        deleteMany: vi.fn().mockResolvedValue(undefined)
+      },
+      modelUsage: {
+        deleteMany: vi.fn().mockResolvedValue(undefined),
+        create: vi.fn().mockResolvedValue(undefined)
+      },
+      auditEvent: {
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(db));
+
+    registerIngestRoutes(app, { db } as any);
+
+    const duplicateFinding = {
+      ruleId: "rule-1",
+      message: "Duplicate finding",
+      severity: "high",
+      file: "src/a.ts",
+      lineStart: 1,
+      lineEnd: 1,
+      fingerprint: "finding_fp_dup",
+      confidence: 0.9
+    };
+    const payload = { ...reviewPayload(), findings: [duplicateFinding, { ...duplicateFinding }] };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ingest/review",
+      payload
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(db.finding.createMany).toHaveBeenCalledTimes(1);
+    expect(db.finding.createMany.mock.calls[0][0].data).toHaveLength(1);
+    expect(response.json().message).toContain("1 finding(s)");
+
+    await app.close();
+  });
+
   test("duplicate review ingestion does not reserve budget again", async () => {
     const app = Fastify({ logger: false });
     const db: any = {

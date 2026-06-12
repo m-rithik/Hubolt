@@ -4,6 +4,8 @@ import { severityRank } from "../core/rank.js";
 import type { ReviewResult } from "../core/pipeline.js";
 import type { AnalyzerSignal, Finding, Severity } from "../types/finding.js";
 import { EMPTY_SEVERITY_COUNTS, type ReviewReport, type SeverityCounts } from "../types/reports.js";
+// Pure pricing data shared with the server's gateway; no runtime coupling.
+import { getModelInfo } from "../server/services/model-catalog.js";
 
 export const HUBOLT_VERSION = "0.1.0";
 
@@ -44,8 +46,33 @@ export function buildReport(params: BuildReportParams): ReviewReport {
     },
     findings: result.findings,
     analyzerSignals: params.analyzerSignals,
-    config
+    config,
+    ...(result.usage
+      ? {
+          modelUsage: {
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            estimatedCostUsd: estimateCost(params.provider, params.model, result.usage)
+          }
+        }
+      : {})
   };
+}
+
+/**
+ * Cost from the shared model catalog when the model is listed there; zero
+ * otherwise (unknown models report tokens but make no pricing claim). CLI
+ * provider ids differ from catalog keys only for claude -> anthropic.
+ */
+function estimateCost(
+  provider: string,
+  model: string,
+  usage: NonNullable<ReviewResult["usage"]>
+): number {
+  const catalogProvider = provider === "claude" ? "anthropic" : provider;
+  const info = getModelInfo(catalogProvider, model);
+  if (!info) return 0;
+  return ((usage.inputTokens + usage.outputTokens) / 1000) * info.costPer1kTokens;
 }
 
 function countBySeverity(findings: Finding[]): SeverityCounts {

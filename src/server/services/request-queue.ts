@@ -1,7 +1,12 @@
 import { Queue, Worker, QueueEvents, type ConnectionOptions } from "bullmq";
 import { createHash } from "node:crypto";
 import { GATEWAY_CONFIG } from "./constants.js";
-import { getRedisConnectionOptions, type RedisClient, type RedisConnectionOptions } from "../redis.js";
+import {
+  getRedisConnectionOptions,
+  toBullMqConnectionOptions,
+  type RedisClient,
+  type RedisConnectionOptions
+} from "../redis.js";
 
 export type BudgetReservationStatus = "reserved" | "reconciled" | "refunded";
 
@@ -328,68 +333,8 @@ export class RequestQueue {
   }
 
   private createBullMqConnection(): ConnectionOptions {
-    const redisUrl = process.env.REDIS_URL || this.redisConnectionOptions.url;
-
-    if (redisUrl) {
-      return this.createBullMqConnectionFromUrl(redisUrl);
-    }
-
-    const { url, ...rest } = this.redisConnectionOptions;
-    return { ...rest, maxRetriesPerRequest: null } as ConnectionOptions;
-  }
-
-  private createBullMqConnectionFromUrl(redisUrl: string): ConnectionOptions {
-    const parsed = new URL(redisUrl);
-    const connection: RedisConnectionOptions = {
-      ...this.redisConnectionOptions,
-      host: parsed.hostname,
-      port: parsed.port ? Number.parseInt(parsed.port, 10) : 6379,
-      maxRetriesPerRequest: null
-    };
-
-    delete connection.url;
-
-    const username = this.decodeRedisUrlPart(parsed.username);
-    if (username) {
-      connection.username = username;
-    }
-
-    const password = this.decodeRedisUrlPart(parsed.password);
-    if (password) {
-      connection.password = password;
-    }
-
-    const db = this.parseRedisDatabase(parsed.pathname);
-    if (db !== undefined) {
-      connection.db = db;
-    }
-
-    if (parsed.protocol === "rediss:") {
-      connection.tls = {};
-    }
-
-    return connection as ConnectionOptions;
-  }
-
-  private decodeRedisUrlPart(value: string): string | undefined {
-    if (!value) {
-      return undefined;
-    }
-
-    try {
-      return decodeURIComponent(value);
-    } catch {
-      return value;
-    }
-  }
-
-  private parseRedisDatabase(pathname: string): number | undefined {
-    if (!pathname || pathname === "/") {
-      return undefined;
-    }
-
-    const db = Number.parseInt(pathname.slice(1), 10);
-    return Number.isInteger(db) && db >= 0 ? db : undefined;
+    const url = process.env.REDIS_URL || this.redisConnectionOptions.url;
+    return toBullMqConnectionOptions({ ...this.redisConnectionOptions, url }) as ConnectionOptions;
   }
 
   private async handleSettlement(

@@ -113,7 +113,17 @@ export class LLMGateway {
 
       this.validateModelOverrides(request);
 
-      const routing = await this.routeWithBudgetContext(request);
+      // When the client pins both provider and model, routing would be
+      // computed and then discarded; skip the two routing queries. Budget
+      // enforcement still happens at reservation time below.
+      const routing: RoutingResult =
+        request.overrideProvider && request.overrideModel
+          ? {
+              provider: request.overrideProvider,
+              model: request.overrideModel,
+              reason: "Client override"
+            }
+          : await this.routeWithBudgetContext(request);
 
       const provider = request.overrideProvider || routing.provider;
       const model = request.overrideModel || routing.model;
@@ -558,15 +568,23 @@ export class LLMGateway {
     }
 
     const llmProvider = getLLMProvider(request.provider, { model: request.model, apiKey });
+    let reportedUsage: { inputTokens: number; outputTokens: number } | undefined;
     const findings = await llmProvider.review({
       system: request.system,
-      user: request.user
+      user: request.user,
+      onUsage: (usage) => {
+        reportedUsage = usage;
+      }
     });
 
+    // Prefer the provider's real token counts; the character-based estimate
+    // remains the fallback for providers that report nothing.
     const promptTokens =
+      reportedUsage?.inputTokens ??
       this.costEstimator.calculateTokens(request.system) +
-      this.costEstimator.calculateTokens(request.user);
-    const completionTokens = this.costEstimator.calculateTokens(JSON.stringify(findings));
+        this.costEstimator.calculateTokens(request.user);
+    const completionTokens =
+      reportedUsage?.outputTokens ?? this.costEstimator.calculateTokens(JSON.stringify(findings));
     const estimatedCostUsd = this.costEstimator.calculateActualCost(
       request.provider,
       request.model,

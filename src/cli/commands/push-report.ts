@@ -119,9 +119,9 @@ async function pushReport(options: PushOptions): Promise<void> {
     modelUsage: {
       provider: report.provider,
       model: report.model,
-      inputTokens: 0,
-      outputTokens: 0,
-      estimatedCostUsd: 0
+      inputTokens: report.modelUsage?.inputTokens ?? 0,
+      outputTokens: report.modelUsage?.outputTokens ?? 0,
+      estimatedCostUsd: report.modelUsage?.estimatedCostUsd ?? 0
     }
   };
 

@@ -10,8 +10,11 @@ import { registerOrgRoutes } from "./routes/orgs.js";
 import { registerBudgetRoutes } from "./routes/budgets.js";
 import { registerRateLimitRoutes } from "./routes/rate-limits.js";
 import { registerGatewayRoutes } from "./routes/gateway.js";
+import { registerUiRoutes } from "./routes/ui.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { LLMGateway } from "./services/llm-gateway.js";
+import { createReviewJobProducer } from "../queue/review-jobs.js";
 import type { RedisClient } from "./redis.js";
 
 export interface ServerContext {
@@ -42,6 +45,8 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
 
   fastify.setErrorHandler(errorHandler);
 
+  await registerUiRoutes(fastify);
+
   registerHealthRoutes(fastify, context);
   registerIngestRoutes(fastify, context);
   registerHistoryRoutes(fastify, context);
@@ -70,6 +75,18 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
     fastify.addHook("onClose", async () => {
       await gateway.close();
     });
+  }
+
+  const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  if (webhookSecret && context.redis) {
+    const producer = createReviewJobProducer(context.redis);
+    registerWebhookRoutes(fastify, context, { secret: webhookSecret, producer });
+    fastify.addHook("onClose", async () => {
+      await producer.close();
+    });
+    console.log("GitHub webhook ingest enabled");
+  } else if (webhookSecret) {
+    console.warn("GITHUB_WEBHOOK_SECRET is set but Redis is unavailable; webhook ingest disabled");
   }
 
   return fastify;

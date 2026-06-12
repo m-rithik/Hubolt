@@ -63,4 +63,22 @@ describe("buildContext", () => {
     expect(big?.skipped).toBe("too-large");
     expect(built.reviewable.map((file) => file.path)).not.toContain("src/big.ts");
   });
+
+  test("enforces maxContextTokens across the whole context, first-fit", async () => {
+    // ~25 tokens each at 4 bytes/token; a 40-token budget fits the first
+    // alphabetical file, cuts the second, and still fits a smaller third.
+    writeFileSync(join(dir, "src/aa.ts"), "x".repeat(100));
+    writeFileSync(join(dir, "src/bb.ts"), "y".repeat(100));
+    writeFileSync(join(dir, "src/cc.ts"), "z".repeat(40));
+    git("add", "-A");
+
+    const config = RepoConfigSchema.parse({ maxContextTokens: 40 });
+    const built = await buildContext({ cwd: dir, staged: true, config });
+
+    const byPath = new Map(built.files.map((file) => [file.path, file]));
+    expect(byPath.get("src/aa.ts")?.skipped).toBeUndefined();
+    expect(byPath.get("src/bb.ts")?.skipped).toBe("over-budget");
+    expect(byPath.get("src/bb.ts")?.content).toBeUndefined();
+    expect(byPath.get("src/cc.ts")?.skipped).toBeUndefined();
+  });
 });

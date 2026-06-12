@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "../../generated/prisma/index.js";
+import { GATEWAY_CONFIG } from "./constants.js";
 
 type BudgetDbClient = Pick<PrismaClient, "$executeRaw" | "budget" | "auditEvent">;
 
@@ -37,7 +38,36 @@ interface RateLimitRow {
 }
 
 export class BudgetService {
+  private lastWindowCleanupMs = 0;
+
   constructor(private db: PrismaClient) {}
+
+  /**
+   * Rate limit windows are one row per org/provider/model/day and would grow
+   * without bound. Delete expired windows opportunistically, at most once an
+   * hour per process, off the request path; failures only log.
+   */
+  private cleanupExpiredWindows(): void {
+    const now = Date.now();
+    if (now - this.lastWindowCleanupMs < 3600_000) {
+      return;
+    }
+    this.lastWindowCleanupMs = now;
+
+    // Best-effort housekeeping: it must never be able to fail a reservation,
+    // including when constructed with a narrow client in tests.
+    const deleteMany = (this.db as Partial<PrismaClient>).rateLimitWindow?.deleteMany;
+    if (typeof deleteMany !== "function") {
+      return;
+    }
+
+    const cutoff = new Date(now - GATEWAY_CONFIG.RATE_LIMIT_WINDOW_RETENTION_DAYS * 86400_000);
+    void Promise.resolve(
+      this.db.rateLimitWindow.deleteMany({ where: { windowStart: { lt: cutoff } } })
+    ).catch((error: unknown) => {
+      console.error("Rate limit window cleanup failed:", error);
+    });
+  }
 
   async reserveUsage(
     orgId: string,
@@ -117,7 +147,7 @@ export class BudgetService {
           INSERT INTO "rate_limit_windows"
             ("id", "orgId", "provider", "model", "windowStart", "requestCount", "maxRequestsPerDay")
           VALUES
-            (${randomUUID()}, ${orgId}, ${provider}, ${model}, ${dayStart}, 1, 1000)
+            (${randomUUID()}, ${orgId}, ${provider}, ${model}, ${dayStart}, 1, ${GATEWAY_CONFIG.MAX_REQUESTS_PER_DAY})
           ON CONFLICT ("orgId", "provider", "model", "windowStart")
           DO UPDATE SET "requestCount" = "rate_limit_windows"."requestCount" + 1
           WHERE "rate_limit_windows"."requestCount" < "rate_limit_windows"."maxRequestsPerDay"
@@ -132,6 +162,8 @@ export class BudgetService {
           });
         }
       });
+
+      this.cleanupExpiredWindows();
 
       return { allowed: true };
     } catch (error) {
@@ -268,7 +300,7 @@ export class BudgetService {
       return {
         allowed: true,
         requestCount: 0,
-        maxRequests: 1000
+        maxRequests: GATEWAY_CONFIG.MAX_REQUESTS_PER_DAY
       };
     }
 

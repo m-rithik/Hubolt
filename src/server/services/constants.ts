@@ -22,6 +22,10 @@ export const GATEWAY_CONFIG = {
   // Priority levels
   PRIORITY_SECURITY: 1,
   PRIORITY_STANDARD: 10,
+
+  // Rate limiting
+  MAX_REQUESTS_PER_DAY: 1000,
+  RATE_LIMIT_WINDOW_RETENTION_DAYS: 7,
 };
 
 // Encryption Configuration

@@ -1,0 +1,1 @@
+{"action":"opened","pull_request":{"number":1,"title":"Sandbox change","draft":false,"head":{"sha":"1111111111111111111111111111111111111111","ref":"feature/sandbox"},"base":{"sha":"2222222222222222222222222222222222222222","ref":"main"}},"repository":{"name":"hubolt-sandbox","full_name":"example/hubolt-sandbox","html_url":"https://github.com/example/hubolt-sandbox"}}

@@ -1,3 +1,6 @@
+import { loadServerEnv } from "../config/env.js";
+loadServerEnv();
+
 import { createApp } from "./app.js";
 import { createPrismaClient, disconnectPrismaClient } from "./db.js";
 import { createRedisClient, connectRedis, disconnectRedis } from "./redis.js";

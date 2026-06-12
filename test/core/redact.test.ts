@@ -76,6 +76,12 @@ describe("redactSecrets", () => {
     expect(count).toBe(1);
   });
 
+  test("does not redact interpolated template references as hardcoded secrets", () => {
+    const input = 'authorization: `Bearer ${token}`';
+
+    expect(redactSecrets(input)).toEqual({ text: input, count: 0 });
+  });
+
   test("redacts well-known token shapes anywhere in a line", () => {
     const { text } = redactSecrets(wrappedCall(MOCK_GITHUB_PAT));
 
@@ -184,6 +190,10 @@ describe("scanSecrets", () => {
         message: `Possible hardcoded secret assigned to "${names.redactedSecrets}".`
       }
     ]);
+  });
+
+  test("does not report interpolated template references as hardcoded secrets", () => {
+    expect(scanSecrets('headers.authorization = `Bearer ${key}`;')).toEqual([]);
   });
 
   test("flags a private key body on the right line", () => {

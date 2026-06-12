@@ -39,6 +39,26 @@ const context: BuiltContext = {
 };
 
 describe("runReviewPipeline", () => {
+  test("surfaces provider-reported token usage on the result", async () => {
+    const config = RepoConfigSchema.parse({});
+    const llm: LLMProvider = {
+      name: "fake",
+      async review(request) {
+        request.onUsage?.({ inputTokens: 48211, outputTokens: 2114 });
+        return [];
+      }
+    };
+
+    const result = await runReviewPipeline({ context, config, llm });
+    expect(result.usage).toEqual({ inputTokens: 48211, outputTokens: 2114 });
+  });
+
+  test("usage stays absent when the provider reports none", async () => {
+    const config = RepoConfigSchema.parse({});
+    const result = await runReviewPipeline({ context, config, llm: fakeProvider([]) });
+    expect(result.usage).toBeUndefined();
+  });
+
   test("filters out-of-scope and below-threshold findings, dedupes, and ranks", async () => {
     const config = RepoConfigSchema.parse({ severityThreshold: "medium" });
     const llm = fakeProvider([

@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { ServerContext } from "../app.js";
 import { hashApiKey } from "../api-keys.js";
+import { shouldTouchLastUsed } from "../middleware/auth.js";
 import { BudgetService } from "../services/budget.js";
 import { z } from "zod";
 
@@ -53,6 +54,18 @@ const IngestPayloadSchema = z.object({
 
 export type IngestPayload = z.infer<typeof IngestPayloadSchema>;
 
+/** Keep the first finding per fingerprint; later duplicates are dropped. */
+function dedupeByFingerprint<T extends { fingerprint: string }>(findings: T[]): T[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    if (seen.has(finding.fingerprint)) {
+      return false;
+    }
+    seen.add(finding.fingerprint);
+    return true;
+  });
+}
+
 export interface IngestResponse {
   success: boolean;
   reviewId: string;
@@ -96,6 +109,10 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
         const provider = payload.modelUsage?.provider || payload.review.provider;
         const model = payload.modelUsage?.model || payload.review.model;
         const estimatedCost = payload.modelUsage?.estimatedCostUsd || 0;
+
+        // Findings are unique per (review, fingerprint) in the database; a
+        // payload repeating a fingerprint must not fail the whole ingest.
+        const findings = dedupeByFingerprint(payload.findings);
 
         const repo = await context.db.repository.upsert({
           where: { orgId_fullName: { orgId: apiKey.orgId, fullName: payload.repository.fullName } },
@@ -149,14 +166,14 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
               provider: payload.review.provider,
               model: payload.review.model,
               summary: payload.review.summary,
-              findingCount: payload.findings.length
+              findingCount: findings.length
             },
             update: {
               scope: payload.review.scope,
               provider: payload.review.provider,
               model: payload.review.model,
               summary: payload.review.summary,
-              findingCount: payload.findings.length
+              findingCount: findings.length
             }
           });
 
@@ -172,9 +189,9 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
             where: { reviewId: upserted.id }
           });
 
-          if (payload.findings.length > 0) {
+          if (findings.length > 0) {
             await tx.finding.createMany({
-              data: payload.findings.map((f) => ({
+              data: findings.map((f) => ({
                 reviewId: upserted.id,
                 ruleId: f.ruleId,
                 message: f.message,
@@ -223,10 +240,12 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
         // logged but must not fail the request or trigger a refund, since the
         // ingested review exists and its cost was genuinely consumed.
         try {
-          await context.db.apiKey.update({
-            where: { id: apiKey.id },
-            data: { lastUsedAt: new Date() }
-          });
+          if (shouldTouchLastUsed(apiKey.lastUsedAt)) {
+            await context.db.apiKey.update({
+              where: { id: apiKey.id },
+              data: { lastUsedAt: new Date() }
+            });
+          }
 
           await context.db.auditEvent.create({
             data: {
@@ -236,7 +255,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
               resourceId: review.id,
               details: JSON.stringify({
                 repo: payload.repository.fullName,
-                findings: payload.findings.length,
+                findings: findings.length,
                 cost: estimatedCost
               })
             }
@@ -248,7 +267,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
         reply.status(201).send({
           success: true,
           reviewId: review.id,
-          message: `Review ingested with ${payload.findings.length} finding(s)`
+          message: `Review ingested with ${findings.length} finding(s)`
         });
       } catch (error) {
         if (error instanceof z.ZodError) {

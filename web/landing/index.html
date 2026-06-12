@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hubolt - context-aware AI code review</title>
+  <meta name="description" content="Local-first, context-aware, evidence-backed AI code review for JavaScript and TypeScript.">
+  <link rel="stylesheet" href="/ui/landing/landing.css">
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-logo">
+      <span class="live-dot" aria-hidden="true"></span>
+      HUBOLT
+    </div>
+    <div class="nav-links">
+      <a href="#capabilities">CAPABILITIES</a>
+      <a href="#pipeline">PIPELINE</a>
+      <a href="#costs">COSTS</a>
+    </div>
+    <a class="nav-cta" href="/ui/">OPEN CONSOLE</a>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-bg" aria-hidden="true">HUBOLT</div>
+
+    <div class="cube-stage" aria-hidden="true">
+      <div class="cube">
+        <div class="cube-face">
+          <span class="face-title">REVIEW</span>
+          <span class="face-sub">full-file context, not diff scraps</span>
+        </div>
+        <div class="cube-face">
+          <span class="face-title">SECURITY</span>
+          <span class="face-sub">analyzer-first, evidence-backed</span>
+        </div>
+        <div class="cube-face">
+          <span class="face-title">GATEWAY</span>
+          <span class="face-sub">routed models, budgets, audit</span>
+        </div>
+        <div class="cube-face">
+          <span class="face-title">GITHUB</span>
+          <span class="face-sub">inline comments on the right lines</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-copy">
+      <h1>CODE REVIEW<br>THAT EARNS TRUST</h1>
+      <p>
+        Local-first, context-aware AI review for JavaScript and TypeScript.
+        Findings come with evidence, verification steps, and the restraint
+        to stay quiet when there is nothing worth saying.
+      </p>
+      <div class="hero-actions">
+        <a class="btn-gradient" href="/ui/">OPEN CONSOLE</a>
+        <a class="btn-ghost" href="https://github.com/m-rithik/hubolt">GITHUB</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="capabilities" id="capabilities">
+    <h2 class="giant">CAPABILITIES</h2>
+
+    <div class="terminal" id="pipeline">
+      <div class="terminal-bar">
+        <span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span>
+        <span class="terminal-title">hubolt review --staged</span>
+      </div>
+      <pre class="terminal-body"><span class="t-prompt">$</span> hubolt review --staged
+
+  <span class="t-dim">context</span>    4 changed files . full-file + semantic regions
+  <span class="t-dim">analyzers</span>  typescript . eslint . secrets . dependency-audit
+  <span class="t-dim">model</span>      claude-sonnet-4-6 via gateway
+
+  <span class="t-crit">critical</span>  src/api/users.ts:42   sql-injection
+            user input interpolated into a SQL string without parameterization
+  <span class="t-high">high</span>      src/api/admin.ts:18   missing-auth-check
+            route handler mutates state before verifying the session
+  <span class="t-med">medium</span>    src/db/reports.ts:77  unbounded-query
+            findMany without take can return the whole table
+
+  <span class="t-ok">3 findings</span> . 11 dropped below threshold . report written to review.json</pre>
+    </div>
+
+    <div class="cap-grid">
+      <div class="cap-card">
+        <span class="cap-label">01 / CONTEXT</span>
+        <h3>WHOLE FILES, NOT HUNKS</h3>
+        <p>Reviews load full changed files, tree-sitter semantic regions, and
+        directly related code. Diff-only review is too shallow to trust.</p>
+      </div>
+      <div class="cap-card">
+        <span class="cap-label">02 / EVIDENCE</span>
+        <h3>ANALYZER-BACKED FINDINGS</h3>
+        <p>TypeScript, ESLint, Semgrep, secret and dependency scanners run
+        first. The model triages signals instead of inventing them.</p>
+      </div>
+      <div class="cap-card">
+        <span class="cap-label">03 / GATEWAY</span>
+        <h3>ROUTED, BUDGETED, AUDITED</h3>
+        <p>A hosted gateway routes each review to the right model, enforces
+        monthly budgets per provider, and writes an audit trail.</p>
+      </div>
+      <div class="cap-card">
+        <span class="cap-label">04 / GITHUB</span>
+        <h3>COMMENTS ON THE RIGHT LINES</h3>
+        <p>Webhook-driven reviews post one summary that updates in place,
+        inline comments mapped to the diff, and suggestion blocks for fixes.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="costs" id="costs">
+    <div class="costs-glow" aria-hidden="true"></div>
+    <h2 class="giant">GATEWAY COSTS</h2>
+    <p class="costs-sub">Real per-model pricing from the gateway catalog. Pick a lane per review scope.</p>
+
+    <div class="tier-row">
+      <div class="tier glass">
+        <span class="tier-label">FAST</span>
+        <div class="tier-model">gemini-2.0-flash</div>
+        <div class="tier-price">$0.000075<span>/1k tokens</span></div>
+        <p>Sweeps and drafts. Quality 8, lowest latency.</p>
+      </div>
+      <div class="tier featured">
+        <span class="tier-label">BALANCED</span>
+        <div class="tier-model">claude-sonnet-4-6</div>
+        <div class="tier-price">$0.003<span>/1k tokens</span></div>
+        <p>The default route for standard reviews. Quality 8.</p>
+      </div>
+      <div class="tier glass">
+        <span class="tier-label">THOROUGH</span>
+        <div class="tier-model">claude-opus-4-8</div>
+        <div class="tier-price">$0.005<span>/1k tokens</span></div>
+        <p>Security scope routes here. Quality 10.</p>
+      </div>
+    </div>
+
+    <div class="calc">
+      <div class="calc-head">
+        <span class="cap-label">ESTIMATE / MONTH</span>
+        <div class="calc-price" id="calc-price">$54</div>
+        <div class="calc-note">on the balanced route, at ~60k tokens per review</div>
+      </div>
+      <input type="range" id="calc-range" min="10" max="2000" step="10" value="300" aria-label="Reviews per month">
+      <div class="calc-row">
+        <span id="calc-count">300 reviews / month</span>
+        <span class="calc-alt" id="calc-alt">fast $1.35 . thorough $90</span>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-giant" aria-hidden="true">HUBOLT</div>
+    <div class="footer-row">
+      <div class="footer-col">
+        <span class="cap-label">PROJECT</span>
+        <a href="https://github.com/m-rithik/hubolt">GitHub</a>
+        <a href="/ui/">Control panel</a>
+      </div>
+      <div class="footer-col">
+        <span class="cap-label">BUILT FOR</span>
+        <span class="footer-text">JavaScript . TypeScript . Node . React</span>
+      </div>
+      <div class="footer-col">
+        <span class="cap-label">LICENSE</span>
+        <span class="footer-text">Apache-2.0 . local-first, not local-only</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/ui/landing/landing.js" type="module"></script>
+</body>
+</html>

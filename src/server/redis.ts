@@ -45,6 +45,69 @@ export function getRedisConnectionOptions(client: RedisClient): RedisConnectionO
   };
 }
 
+/**
+ * Resolve connection options into the plain host/port shape BullMQ expects.
+ * A url (REDIS_URL style) takes precedence and is decomposed into discrete
+ * fields; BullMQ requires maxRetriesPerRequest to be null either way.
+ */
+export function toBullMqConnectionOptions(options: RedisConnectionOptions): RedisConnectionOptions {
+  const { url, ...rest } = options;
+
+  if (!url) {
+    return { ...rest, maxRetriesPerRequest: null };
+  }
+
+  const parsed = new URL(url);
+  const connection: RedisConnectionOptions = {
+    ...rest,
+    host: parsed.hostname,
+    port: parsed.port ? Number.parseInt(parsed.port, 10) : 6379,
+    maxRetriesPerRequest: null
+  };
+
+  const username = decodeRedisUrlPart(parsed.username);
+  if (username) {
+    connection.username = username;
+  }
+
+  const password = decodeRedisUrlPart(parsed.password);
+  if (password) {
+    connection.password = password;
+  }
+
+  const db = parseRedisDatabase(parsed.pathname);
+  if (db !== undefined) {
+    connection.db = db;
+  }
+
+  if (parsed.protocol === "rediss:") {
+    connection.tls = {};
+  }
+
+  return connection;
+}
+
+function decodeRedisUrlPart(value: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseRedisDatabase(pathname: string): number | undefined {
+  if (!pathname || pathname === "/") {
+    return undefined;
+  }
+
+  const db = Number.parseInt(pathname.slice(1), 10);
+  return Number.isInteger(db) && db >= 0 ? db : undefined;
+}
+
 export async function connectRedis(client: RedisClient): Promise<void> {
   await client.connect();
 }

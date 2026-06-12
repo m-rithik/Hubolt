@@ -72,6 +72,37 @@ describe("buildReport", () => {
     const report = buildReport({ ...params, config: RepoConfigSchema.parse({ failOnSeverity: "critical" }) });
     expect(report.status).toBe("ok");
   });
+
+  test("carries token usage and prices catalog models", () => {
+    const report = buildReport({
+      ...params,
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+      result: result({ usage: { inputTokens: 1000, outputTokens: 500 } })
+    });
+
+    expect(report.modelUsage).toEqual({
+      inputTokens: 1000,
+      outputTokens: 500,
+      estimatedCostUsd: (1500 / 1000) * 0.003
+    });
+  });
+
+  test("reports tokens with zero cost for models outside the catalog", () => {
+    const report = buildReport({
+      ...params,
+      provider: "google",
+      model: "gemini-flash-latest",
+      result: result({ usage: { inputTokens: 100, outputTokens: 10 } })
+    });
+
+    expect(report.modelUsage).toMatchObject({ inputTokens: 100, outputTokens: 10, estimatedCostUsd: 0 });
+  });
+
+  test("omits modelUsage when the pipeline saw no usage", () => {
+    const report = buildReport(params);
+    expect(report.modelUsage).toBeUndefined();
+  });
 });
 
 describe("renderers", () => {

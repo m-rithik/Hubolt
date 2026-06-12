@@ -4,9 +4,20 @@ import type { RepoConfig } from "../config/schema.js";
 
 export type { AnalyzerSignal } from "./finding.js";
 
+/** Token consumption reported by the underlying model API. */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface LLMReviewRequest {
   system: string;
   user: string;
+  /**
+   * Invoked with real token usage when the provider reports it. Optional and
+   * additive: providers that cannot report usage simply never call it.
+   */
+  onUsage?: (usage: TokenUsage) => void;
 }
 
 export interface LLMProviderOptions {

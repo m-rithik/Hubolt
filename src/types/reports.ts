@@ -38,7 +38,16 @@ export const ReviewReportSchema = z.object({
   counts: ReportCountsSchema,
   findings: z.array(FindingSchema),
   analyzerSignals: z.array(AnalyzerSignalSchema),
-  config: RepoConfigSchema
+  config: RepoConfigSchema,
+  // Optional and additive: reports written before token tracking existed
+  // still validate, and providers that report no usage omit it.
+  modelUsage: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      estimatedCostUsd: z.number().nonnegative()
+    })
+    .optional()
 });
 
 export type ReviewReport = z.infer<typeof ReviewReportSchema>;

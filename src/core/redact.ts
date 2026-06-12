@@ -96,7 +96,11 @@ export function redactSecrets(text: string, options: RedactionOptions = {}): Red
 
     let redacted = line.replace(ASSIGNMENT, (match, name, op, singleValue, doubleValue, backtickValue) => {
       const value = String(singleValue ?? doubleValue ?? backtickValue ?? "");
-      if (isRedactionMetadata(name, value) || isEnvVarReference(name, value)) {
+      if (
+        isRedactionMetadata(name, value) ||
+        isEnvVarReference(name, value) ||
+        isInterpolatedTemplateReference(backtickValue)
+      ) {
         return match;
       }
 
@@ -120,6 +124,10 @@ export function redactSecrets(text: string, options: RedactionOptions = {}): Red
 
 function isEnvVarReference(name: string, value: string): boolean {
   return ENV_REFERENCE_FIELD.test(name) && ENV_VAR_NAME.test(value);
+}
+
+function isInterpolatedTemplateReference(value: unknown): boolean {
+  return typeof value === "string" && value.includes("${");
 }
 
 function isRedactionMetadata(name: string, value: string): boolean {
@@ -208,7 +216,11 @@ export function scanSecrets(text: string): SecretMatch[] {
     for (const assignment of line.matchAll(ASSIGNMENT)) {
       const name = String(assignment[1]);
       const value = String(assignment[3] ?? assignment[4] ?? assignment[5] ?? "");
-      if (isRedactionMetadata(name, value) || isEnvVarReference(name, value)) {
+      if (
+        isRedactionMetadata(name, value) ||
+        isEnvVarReference(name, value) ||
+        isInterpolatedTemplateReference(assignment[5])
+      ) {
         continue;
       }
       matches.push({

@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { cancel, confirm, intro, isCancel, text } from "@clack/prompts";
 import type { Command } from "commander";
 import { writeEnvFile } from "../../config/env-file.js";
+import { loadServerEnv } from "../../config/env.js";
 import { generateApiKey, hashApiKey } from "../../server/api-keys.js";
 import { runSafelyAsync } from "../errors.js";
 
@@ -49,6 +50,8 @@ export function registerServerCommand(program: Command): void {
 }
 
 async function runServer(options: ServerOptions): Promise<void> {
+  loadServerEnv();
+
   const portStr = options.port || process.env.PORT || "3000";
   const port = parseInt(portStr, 10);
 
@@ -124,6 +127,8 @@ async function runServer(options: ServerOptions): Promise<void> {
 }
 
 async function bootstrapServer(options: BootstrapOptions): Promise<void> {
+  loadServerEnv();
+
   const resolved = await resolveBootstrapOptions(options);
   const slug = normalizeOrgSlug(resolved.org);
   const email = normalizeEmail(resolved.email);

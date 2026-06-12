@@ -7,6 +7,16 @@ export interface AuthenticatedRequest extends FastifyRequest {
   orgId?: string;
 }
 
+/**
+ * lastUsedAt is observability data, not an audit trail; writing it on every
+ * request doubles database round-trips. Refresh it at most this often.
+ */
+export const LAST_USED_WRITE_INTERVAL_MS = 5 * 60 * 1000;
+
+export function shouldTouchLastUsed(lastUsedAt: Date | null, now: Date = new Date()): boolean {
+  return !lastUsedAt || now.getTime() - lastUsedAt.getTime() >= LAST_USED_WRITE_INTERVAL_MS;
+}
+
 export function createAuthMiddleware(db: PrismaClient) {
   return async (request: AuthenticatedRequest, reply: FastifyReply) => {
     const authHeader = request.headers.authorization;
@@ -17,6 +27,7 @@ export function createAuthMiddleware(db: PrismaClient) {
     }
 
     const key = authHeader.slice(7);
+    let staleLastUsed = false;
 
     try {
       const apiKey = await db.apiKey.findUnique({
@@ -36,6 +47,7 @@ export function createAuthMiddleware(db: PrismaClient) {
 
       request.apiKey = key;
       request.orgId = apiKey.orgId;
+      staleLastUsed = shouldTouchLastUsed(apiKey.lastUsedAt);
     } catch (error) {
       request.server.log.error(error);
       reply.status(500).send({ error: "Authentication failed" });
@@ -44,13 +56,15 @@ export function createAuthMiddleware(db: PrismaClient) {
 
     // lastUsedAt is bookkeeping; a failure here must not reject a request
     // that has already authenticated successfully.
-    try {
-      await db.apiKey.update({
-        where: { keyHash: hashApiKey(key) },
-        data: { lastUsedAt: new Date() }
-      });
-    } catch (error) {
-      request.server.log.error(error);
+    if (staleLastUsed) {
+      try {
+        await db.apiKey.update({
+          where: { keyHash: hashApiKey(key) },
+          data: { lastUsedAt: new Date() }
+        });
+      } catch (error) {
+        request.server.log.error(error);
+      }
     }
   };
 }

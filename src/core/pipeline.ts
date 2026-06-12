@@ -24,6 +24,8 @@ export interface ReviewResult {
   droppedByMode: number;
   analyzerSignals: number;
   promotedFromAnalyzers: number;
+  /** Real token usage from the model API, when the provider reported it. */
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 /** Finding categories kept when running in security mode. */
@@ -45,7 +47,14 @@ export async function runReviewPipeline(params: RunPipelineParams): Promise<Revi
   const analyzerSignals = params.analyzerSignals ?? [];
 
   const prompt = buildReviewPrompt(context, config, analyzerSignals);
-  const raw = await llm.review({ system: prompt.system, user: prompt.user });
+  let usage: ReviewResult["usage"];
+  const raw = await llm.review({
+    system: prompt.system,
+    user: prompt.user,
+    onUsage: (reported) => {
+      usage = reported;
+    }
+  });
 
   // The LLM schema is intentionally loose for strict structured output, so each
   // candidate is re-validated against the full FindingSchema (positive, ordered
@@ -109,7 +118,8 @@ export async function runReviewPipeline(params: RunPipelineParams): Promise<Revi
     belowThreshold: inScope.length - passing.length,
     droppedByMode: passing.length - inMode.length,
     analyzerSignals: analyzerSignals.length,
-    promotedFromAnalyzers: promoted.length
+    promotedFromAnalyzers: promoted.length,
+    ...(usage ? { usage } : {})
   };
 }
 
