@@ -51,6 +51,25 @@ describe("buildReviewPrompt", () => {
     expect(user).toContain("END_UNTRUSTED_");
   });
 
+  test("team memory cards are fenced as data with their own kind", () => {
+    const config = RepoConfigSchema.parse({});
+    const prompt = buildReviewPrompt(context(), config, [], [
+      "rule no-console: dismissed 4 times\n- only report clear-cut cases\n- keep \"quotes\" readable"
+    ]);
+
+    expect(prompt.user).toContain("kind=teamMemory");
+    expect(prompt.user).toContain("dismissed 4 times");
+    expect(prompt.user).toContain("- only report clear-cut cases");
+    expect(prompt.user).toContain('- keep "quotes" readable');
+    expect(prompt.system).toContain("team memory cards");
+  });
+
+  test("memory section is absent when no cards are supplied", () => {
+    const config = RepoConfigSchema.parse({});
+    const prompt = buildReviewPrompt(context(), config);
+    expect(prompt.user).not.toContain("kind=teamMemory");
+  });
+
   test("repository rules are fenced as untrusted data", () => {
     const config = RepoConfigSchema.parse({ rules: ["Validate request bodies with zod."] });
     const { user } = buildReviewPrompt(context(), config);

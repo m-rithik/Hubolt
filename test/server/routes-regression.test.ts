@@ -99,7 +99,7 @@ describe("server route regressions", () => {
       expect.objectContaining({
         where: {
           id: "review_1",
-          repo: { orgId: "org_1" }
+          orgId: "org_1"
         },
         include: expect.objectContaining({
           findings: false,
@@ -107,6 +107,88 @@ describe("server route regressions", () => {
         })
       })
     );
+
+    await app.close();
+  });
+
+  test("history review list applies severity filters", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue(authApiKey()),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      review: {
+        count: vi.fn().mockResolvedValue(0),
+        findMany: vi.fn().mockResolvedValue([])
+      }
+    };
+
+    registerHistoryRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/history/reviews?severity=high",
+      headers: bearerHeaders()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(db.review.count).toHaveBeenCalledWith({
+      where: {
+        orgId: "org_1",
+        findings: { some: { severity: "high" } }
+      }
+    });
+    expect(db.review.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          orgId: "org_1",
+          findings: { some: { severity: "high" } }
+        }
+      })
+    );
+
+    await app.close();
+  });
+
+  test("history trends uses direct org-scoped review and finding filters", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue(authApiKey()),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      review: {
+        count: vi.fn().mockResolvedValue(2)
+      },
+      finding: {
+        groupBy: vi.fn(async (args: any) =>
+          args.by.includes("severity")
+            ? [{ severity: "high", _count: { _all: 3 } }]
+            : [{ ruleId: "rule-1", _count: { _all: 3 } }]
+        )
+      },
+      findingFeedback: {
+        groupBy: vi.fn().mockResolvedValue([])
+      }
+    };
+
+    registerHistoryRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/history/trends?days=7",
+      headers: bearerHeaders()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(db.review.count).toHaveBeenCalledWith({
+      where: { orgId: "org_1", createdAt: { gte: expect.any(Date) } }
+    });
+    for (const call of db.finding.groupBy.mock.calls) {
+      expect(call[0].where).toEqual({ orgId: "org_1", createdAt: { gte: expect.any(Date) } });
+      expect(call[0].where).not.toHaveProperty("review");
+    }
 
     await app.close();
   });
@@ -186,6 +268,46 @@ describe("server route regressions", () => {
     await app.close();
   });
 
+  test("ingest rejects invalid finding line ranges before database writes", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: {
+        findUnique: vi.fn()
+      },
+      repository: {
+        upsert: vi.fn()
+      }
+    };
+
+    registerIngestRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ingest/review",
+      payload: {
+        ...reviewPayload(),
+        findings: [
+          {
+            ruleId: "rule-1",
+            message: "Invalid range",
+            severity: "high",
+            file: "src/a.ts",
+            lineStart: 10,
+            lineEnd: 2,
+            fingerprint: "finding_fp_bad",
+            confidence: 0.9
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(db.apiKey.findUnique).not.toHaveBeenCalled();
+    expect(db.repository.upsert).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   test("duplicate finding fingerprints are deduped instead of failing ingest", async () => {
     const app = Fastify({ logger: false });
     const db: any = {
@@ -243,6 +365,10 @@ describe("server route regressions", () => {
     expect(response.statusCode).toBe(201);
     expect(db.finding.createMany).toHaveBeenCalledTimes(1);
     expect(db.finding.createMany.mock.calls[0][0].data).toHaveLength(1);
+    expect(db.finding.createMany.mock.calls[0][0].data[0]).toMatchObject({
+      orgId: "org_1",
+      repoId: "repo_1"
+    });
     expect(response.json().message).toContain("1 finding(s)");
 
     await app.close();

@@ -20,7 +20,7 @@ export class InputValidator {
   }
 
   validateApiKey(apiKey: string): void {
-    if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) {
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
       throw new ValidationError('apiKey', 'must be a non-empty string with at least 10 characters');
     }
   }

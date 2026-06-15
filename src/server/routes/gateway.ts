@@ -9,7 +9,7 @@ import { createAuthMiddleware, type AuthenticatedRequest } from "../middleware/a
 
 const ConfigureCredentialSchema = z.object({
   provider: z.enum(["anthropic", "openai", "google"]),
-  apiKey: z.string().min(10, "API key must be at least 10 characters")
+  apiKey: z.string().trim().min(10, "API key must be at least 10 characters")
 });
 
 const ProcessRequestSchema = z.object({

@@ -77,6 +77,17 @@ describe("GitHubScmProvider", () => {
     expect((error as ScmError).message).not.toContain(TOKEN);
   });
 
+  test("fails rather than returning incomplete paginated data", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse([], {
+        headers: { link: '<https://api.github.com/repos/owner/repo/pulls/7/files?page=next>; rel="next"' }
+      })
+    ) as unknown as typeof fetch;
+    const provider = buildProvider(fetchImpl);
+
+    await expect(provider.listPullRequestFiles(7)).rejects.toThrow(/pagination exceeded/i);
+  });
+
   test("createReview posts an atomic review with mapped inline comments", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ id: 1 })) as unknown as typeof fetch;
     const provider = buildProvider(fetchImpl);

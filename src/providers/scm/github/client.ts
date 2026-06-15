@@ -42,6 +42,9 @@ interface RawComment {
   body?: string;
   path?: string;
   line?: number | null;
+  in_reply_to_id?: number | null;
+  user?: { login?: string; type?: string };
+  reactions?: Record<string, unknown>;
 }
 
 export class GitHubScmProvider implements ScmProvider {
@@ -163,7 +166,14 @@ export class GitHubScmProvider implements ScmProvider {
       id: comment.id,
       body: comment.body ?? "",
       path: comment.path ?? "",
-      line: comment.line ?? null
+      line: comment.line ?? null,
+      inReplyTo: comment.in_reply_to_id ?? null,
+      authorLogin: comment.user?.login,
+      authorIsBot: comment.user?.type === "Bot",
+      reactions: {
+        up: readReactionCount(comment.reactions, "+1"),
+        down: readReactionCount(comment.reactions, "-1")
+      }
     }));
   }
 
@@ -234,6 +244,10 @@ export class GitHubScmProvider implements ScmProvider {
       url = parseNextLink(response.headers.get("link"));
     }
 
+    if (url) {
+      throw new ScmError(`GitHub pagination exceeded ${MAX_PAGES} pages for GET ${path}`, 502);
+    }
+
     return results;
   }
 
@@ -255,6 +269,11 @@ export class GitHubScmProvider implements ScmProvider {
 
     return new ScmError(`GitHub request failed (${response.status}) while trying to ${action}${detail}`, response.status);
   }
+}
+
+function readReactionCount(reactions: Record<string, unknown> | undefined, key: string): number {
+  const value = reactions?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 /** Extract the rel="next" URL from a Link header, if present. */

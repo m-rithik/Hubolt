@@ -27,6 +27,12 @@ function sanitizeFingerprint(fingerprint: string): string {
   return fingerprint.replace(/[^A-Za-z0-9._:-]/g, "").slice(0, 128);
 }
 
+/** The fingerprint embedded in one comment body, or null. */
+export function extractFingerprint(body: string): string | null {
+  const match = new RegExp(FINDING_MARKER_PATTERN.source).exec(body);
+  return match ? match[1] : null;
+}
+
 /** Collect already-posted finding fingerprints from prior comment bodies. */
 export function extractPostedFingerprints(comments: Array<{ body: string }>): Set<string> {
   const fingerprints = new Set<string>();
@@ -96,7 +102,11 @@ export function buildSummaryBody(
 
   const total = report.findings.length;
   if (total === 0) {
-    lines.push("No findings at or above the configured threshold.");
+    if (summaryOnly.length === 0) {
+      lines.push("No findings at or above the configured threshold.");
+    } else {
+      lines.push(`${summaryOnly.length} finding(s) moved to the summary; none posted inline.`);
+    }
   } else {
     const counts = SEVERITY_ORDER.map(
       (severity) => `${severity}: ${report.summary.bySeverity[severity]}`

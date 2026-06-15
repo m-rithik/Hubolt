@@ -9,12 +9,12 @@ import { renderAudit } from "./views/audit.js";
 import { renderOrganization } from "./views/organization.js";
 
 const ROUTES = [
-  { path: "overview", title: "Overview", description: "Server health and recent activity.", render: renderOverview },
-  { path: "reviews", title: "Reviews", description: "Stored review history for this organization.", render: renderReviews },
-  { path: "budgets", title: "Budgets", description: "Monthly spending limits per provider.", render: renderBudgets },
-  { path: "gateway", title: "Gateway", description: "Hosted LLM routing: credentials, queue, and models.", render: renderGateway },
-  { path: "audit", title: "Audit log", description: "Recorded actions across the organization.", render: renderAudit },
-  { path: "organization", title: "Organization", description: "Members and API key metadata.", render: renderOrganization }
+  { path: "overview", title: "Overview", description: "Health, queue pressure, recent reviews, and monthly spend.", render: renderOverview },
+  { path: "reviews", title: "Reviews", description: "Review history with findings, analyzer signals, and model usage.", render: renderReviews },
+  { path: "budgets", title: "Budgets", description: "Provider-level monthly limits and alert thresholds.", render: renderBudgets },
+  { path: "gateway", title: "Gateway", description: "LLM credentials, queue state, and routeable model catalog.", render: renderGateway },
+  { path: "audit", title: "Audit log", description: "Organization actions recorded for operational traceability.", render: renderAudit },
+  { path: "organization", title: "Organization", description: "Members, API key metadata, and account identity.", render: renderOrganization }
 ];
 
 const KEYMAP = [
@@ -39,11 +39,16 @@ const view = document.getElementById("view");
 
 let healthTimer = null;
 let selectedRow = -1;
+// Remembers the last reviews list (filter + page) so detail pages return to
+// where the user actually was, surviving refresh and deep links.
+let lastReviewsHash = "#/reviews";
 
 function parseHash() {
-  const hash = window.location.hash.replace(/^#\/?/, "");
-  const [path, ...rest] = hash.split("/");
-  return { path: path || "overview", arg: rest.join("/") || null };
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [pathPart, queryPart] = raw.split("?");
+  const [path, ...rest] = pathPart.split("/");
+  const query = Object.fromEntries(new URLSearchParams(queryPart || ""));
+  return { path: path || "overview", arg: rest.join("/") || null, query };
 }
 
 function buildNav() {
@@ -103,7 +108,7 @@ async function pollHealth() {
 }
 
 async function route() {
-  const { path, arg } = parseHash();
+  const { path, arg, query } = parseHash();
   selectedRow = -1;
 
   if (path === "reviews" && arg) {
@@ -111,8 +116,12 @@ async function route() {
     pageDesc.textContent = "Findings, analyzer signals, and model usage for one review.";
     document.title = "review detail - hubolt";
     setActiveNav("reviews");
-    await safeRender((container) => renderReviewDetail(container, arg));
+    await safeRender((container) => renderReviewDetail(container, arg, lastReviewsHash));
     return;
+  }
+
+  if (path === "reviews") {
+    lastReviewsHash = window.location.hash || "#/reviews";
   }
 
   const match = ROUTES.find((route) => route.path === path) ?? ROUTES[0];
@@ -120,12 +129,18 @@ async function route() {
   pageDesc.textContent = match.description;
   document.title = `${match.title.toLowerCase()} - hubolt`;
   setActiveNav(match.path);
-  await safeRender(match.render);
+  await safeRender((container) => match.render(container, query));
 }
 
 async function safeRender(render) {
   clear(view);
-  view.append(el("div", { class: "loading", text: "Loading" }));
+
+  // Defer the loading line so fast responses never flash it.
+  const loadingTimer = setTimeout(() => {
+    if (!view.firstChild) {
+      view.append(el("div", { class: "loading", text: "Loading" }));
+    }
+  }, 150);
 
   try {
     await render(view);
@@ -135,8 +150,17 @@ async function safeRender(render) {
       boot();
       return;
     }
+    const retry = el("button", { text: "retry" });
+    retry.addEventListener("click", () => route());
     clear(view);
-    view.append(notice("error", error && error.message ? error.message : "Failed to load"));
+    view.append(
+      notice("error", error && error.message ? error.message : "Failed to load"),
+      retry
+    );
+  } finally {
+    clearTimeout(loadingTimer);
+    const loading = view.querySelector(".loading");
+    if (loading && view.children.length > 1) loading.remove();
   }
 }
 

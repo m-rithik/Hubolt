@@ -3,7 +3,7 @@ import { PrismaClient } from "../../generated/prisma/index.js";
 import { hashApiKey } from "../api-keys.js";
 
 export interface AuthenticatedRequest extends FastifyRequest {
-  apiKey?: string;
+  authenticated?: boolean;
   orgId?: string;
 }
 
@@ -45,7 +45,7 @@ export function createAuthMiddleware(db: PrismaClient) {
         return;
       }
 
-      request.apiKey = key;
+      request.authenticated = true;
       request.orgId = apiKey.orgId;
       staleLastUsed = shouldTouchLastUsed(apiKey.lastUsedAt);
     } catch (error) {
@@ -70,5 +70,5 @@ export function createAuthMiddleware(db: PrismaClient) {
 }
 
 export function isAuthenticated(request: AuthenticatedRequest): boolean {
-  return Boolean(request.apiKey && request.orgId);
+  return Boolean(request.authenticated && request.orgId);
 }

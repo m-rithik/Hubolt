@@ -10,7 +10,7 @@ export interface RedactionOptions {
 const PLACEHOLDER = "[REDACTED]";
 
 const ASSIGNMENT =
-  /\b(\w*(?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|private[_-]?key|client[_-]?secret|auth|credential)\w*)\b(\s*[:=]\s*)(?:'((?:\\.|[^'\\\n]){4,})'|"((?:\\.|[^"\\\n]){4,})"|`((?:\\.|[^`\\\n]){4,})`)/gi;
+  /\b(\w*(?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|private[_-]?key|client[_-]?secret|authorization|auth[_-]?header|authheader|credential)\w*)\b(\s*[:=]\s*)(?:'((?:\\.|[^'\\\n]){4,})'|"((?:\\.|[^"\\\n]){4,})"|`((?:\\.|[^`\\\n]){4,})`)/gi;
 
 // Provider-specific token shapes that are secrets regardless of surrounding code.
 interface TokenPattern {

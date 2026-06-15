@@ -5,6 +5,16 @@ import { shouldTouchLastUsed } from "../middleware/auth.js";
 import { BudgetService } from "../services/budget.js";
 import { z } from "zod";
 
+const IngestLineRangeSchema = z
+  .object({
+    lineStart: z.number().int().positive(),
+    lineEnd: z.number().int().positive()
+  })
+  .refine((range) => range.lineStart <= range.lineEnd, {
+    message: "lineStart must be less than or equal to lineEnd",
+    path: ["lineEnd"]
+  });
+
 const IngestPayloadSchema = z.object({
   apiKey: z.string().min(1),
   repository: z.object({
@@ -26,11 +36,9 @@ const IngestPayloadSchema = z.object({
       message: z.string(),
       severity: z.enum(["info", "low", "medium", "high", "critical"]),
       file: z.string(),
-      lineStart: z.number().int(),
-      lineEnd: z.number().int(),
       fingerprint: z.string(),
       confidence: z.number().min(0).max(1).default(0.5)
-    })
+    }).and(IngestLineRangeSchema)
   ),
   analyzerSignals: z.array(
     z.object({
@@ -38,10 +46,8 @@ const IngestPayloadSchema = z.object({
       ruleId: z.string(),
       message: z.string(),
       severity: z.enum(["info", "low", "medium", "high", "critical"]),
-      file: z.string(),
-      lineStart: z.number().int(),
-      lineEnd: z.number().int()
-    })
+      file: z.string()
+    }).and(IngestLineRangeSchema)
   ).optional(),
   modelUsage: z.object({
     provider: z.string(),
@@ -160,6 +166,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
           const upserted = await tx.review.upsert({
             where: { repoId_fingerprint: { repoId: repo.id, fingerprint: payload.review.fingerprint } },
             create: {
+              orgId: apiKey.orgId,
               repoId: repo.id,
               fingerprint: payload.review.fingerprint,
               scope: payload.review.scope,
@@ -169,6 +176,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
               findingCount: findings.length
             },
             update: {
+              orgId: apiKey.orgId,
               scope: payload.review.scope,
               provider: payload.review.provider,
               model: payload.review.model,
@@ -192,6 +200,8 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
           if (findings.length > 0) {
             await tx.finding.createMany({
               data: findings.map((f) => ({
+                orgId: apiKey.orgId,
+                repoId: repo.id,
                 reviewId: upserted.id,
                 ruleId: f.ruleId,
                 message: f.message,

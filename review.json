@@ -5,24 +5,24 @@
     "version": "0.1.0",
     "promptVersion": "1"
   },
-  "generatedAt": "2026-06-11T23:11:41.992Z",
+  "generatedAt": "2026-06-15T08:06:31.324Z",
   "scope": "staged changes",
   "mode": "balanced",
   "provider": "google",
   "model": "gemini-flash-latest",
   "status": "ok",
   "summary": {
-    "total": 0,
+    "total": 1,
     "bySeverity": {
       "info": 0,
       "low": 0,
-      "medium": 0,
+      "medium": 1,
       "high": 0,
       "critical": 0
     }
   },
   "counts": {
-    "rawCount": 0,
+    "rawCount": 1,
     "droppedInvalid": 0,
     "droppedOutOfScope": 0,
     "belowThreshold": 0,
@@ -30,7 +30,34 @@
     "analyzerSignals": 0,
     "promotedFromAnalyzers": 0
   },
-  "findings": [],
+  "findings": [
+    {
+      "fingerprint": "fp_cfe8c1ccb1b4f643",
+      "ruleId": "performance.prisma-interactive-transaction-promise-all",
+      "title": "Concurrency risk and potential deadlock from Promise.all in interactive transaction",
+      "message": "Executing database updates concurrently using Promise.all inside a Prisma interactive transaction ($transaction) is a known performance anti-pattern. Because interactive transactions serialize operations on a single database connection, triggering concurrent updates via Promise.all can lead to connection pool starvation, deadlocks, or transaction timeouts.",
+      "category": "performance",
+      "severity": "medium",
+      "confidenceLabel": "high",
+      "source": "llm",
+      "range": {
+        "file": "src/server/services/memory.ts",
+        "startLine": 93,
+        "endLine": 112,
+        "diffSide": "right"
+      },
+      "evidence": [
+        "await Promise.all(",
+        "cardsToUpdate.map((card) =>",
+        "tx.memoryCard.update({"
+      ],
+      "impact": "When rebuilding rule-calibration cards with a large volume of rule feedback, the memory rebuild process can suffer from transactional deadlocks, query timeouts, or database connection exhaustion.",
+      "suggestion": "Execute the update operations sequentially using a 'for...of' loop inside the transaction instead of using Promise.all.",
+      "verification": "Rebuild the memory cards on a database populated with a large volume of distinct rule feedback. Verify that executing the updates sequentially completes reliably without transaction deadlocks or database connection starvation.",
+      "relatedSignals": [],
+      "tags": []
+    }
+  ],
   "analyzerSignals": [],
   "config": {
     "mode": "balanced",
@@ -70,8 +97,8 @@
     "rules": []
   },
   "modelUsage": {
-    "inputTokens": 97138,
-    "outputTokens": 9740,
+    "inputTokens": 73061,
+    "outputTokens": 22071,
     "estimatedCostUsd": 0
   }
 }

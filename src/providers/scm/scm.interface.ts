@@ -31,6 +31,12 @@ export interface ReviewComment {
   body: string;
   path: string;
   line: number | null;
+  /** Comment id this one replies to, when it is a thread reply. */
+  inReplyTo?: number | null;
+  authorLogin?: string;
+  authorIsBot?: boolean;
+  /** Reaction rollup as delivered by the SCM (thumbs up / down). */
+  reactions?: { up: number; down: number };
 }
 
 export type DiffSide = "LEFT" | "RIGHT";

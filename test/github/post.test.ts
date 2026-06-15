@@ -111,6 +111,18 @@ describe("comment building blocks", () => {
     expect(body).toContain("headsha123");
   });
 
+  test("summary body does not claim no findings when all findings are summary-only", () => {
+    const body = buildSummaryBody(
+      makeReport([]),
+      [{ finding: makeFinding({ title: "Demoted finding" }), reason: "dismissed twice" }],
+      "headsha123"
+    );
+
+    expect(body).toContain("1 finding(s) moved to the summary; none posted inline.");
+    expect(body).toContain("Demoted finding");
+    expect(body).not.toContain("No findings at or above the configured threshold.");
+  });
+
   test("suggestion blocks require fixPatch, added-only ranges, and no fences", () => {
     const index = buildDiffIndex(FILES);
 
@@ -190,6 +202,29 @@ describe("postReviewToPullRequest", () => {
     expect(scm.updateIssueComment).toHaveBeenCalledWith(55, expect.stringContaining(SUMMARY_MARKER));
     expect(scm.createIssueComment).not.toHaveBeenCalled();
     expect(scm.createReview).not.toHaveBeenCalled();
+  });
+
+  test("creates a replacement summary and still posts inline comments when summary update fails", async () => {
+    const scm = makeScm({
+      issueComments: [{ id: 55, body: `${SUMMARY_MARKER}\nprevious` }]
+    });
+    (scm.updateIssueComment as any).mockRejectedValue(new Error("cannot edit comment"));
+    const report = makeReport([makeFinding()]);
+
+    const result = await postReviewToPullRequest({ scm, prNumber: 7, report });
+
+    expect(result).toMatchObject({
+      inlinePosted: 1,
+      summaryAction: "created"
+    });
+    expect(scm.updateIssueComment).toHaveBeenCalledWith(55, expect.stringContaining(SUMMARY_MARKER));
+    expect(scm.createIssueComment).toHaveBeenCalledWith(7, expect.stringContaining(SUMMARY_MARKER));
+    expect(scm.createReview).toHaveBeenCalledWith(
+      7,
+      "headsha123",
+      undefined,
+      [expect.objectContaining({ path: "src/a.ts", line: 11 })]
+    );
   });
 
   test("caps inline comments at the configured comment budget", async () => {

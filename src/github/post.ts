@@ -16,6 +16,11 @@ export interface PostReviewParams {
   report: ReviewReport;
   /** Commit the review is anchored to; defaults to the PR's current head. */
   headSha?: string;
+  /**
+   * Findings demoted before posting (e.g. by feedback history); they appear
+   * in the summary with their reason instead of as inline comments.
+   */
+  extraSummaryOnly?: SummaryOnlyFinding[];
 }
 
 export interface PostReviewResult {
@@ -43,7 +48,7 @@ export async function postReviewToPullRequest(params: PostReviewParams): Promise
   const postedFingerprints = extractPostedFingerprints(priorInline);
 
   const drafts: InlineCommentDraft[] = [];
-  const summaryOnly: SummaryOnlyFinding[] = [];
+  const summaryOnly: SummaryOnlyFinding[] = [...(params.extraSummaryOnly ?? [])];
   let skippedDuplicates = 0;
   let suggestionsIncluded = 0;
   const commentBudget = resolveCommentBudget(report);
@@ -90,8 +95,13 @@ export async function postReviewToPullRequest(params: PostReviewParams): Promise
 
   let summaryAction: PostReviewResult["summaryAction"];
   if (existingSummary) {
-    await scm.updateIssueComment(existingSummary.id, summaryBody);
-    summaryAction = "updated";
+    try {
+      await scm.updateIssueComment(existingSummary.id, summaryBody);
+      summaryAction = "updated";
+    } catch {
+      await scm.createIssueComment(prNumber, summaryBody);
+      summaryAction = "created";
+    }
   } else {
     await scm.createIssueComment(prNumber, summaryBody);
     summaryAction = "created";

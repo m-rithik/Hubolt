@@ -19,7 +19,8 @@ const STATUS_BY_CODE: Record<string, ChangeStatus> = {
   M: "modified",
   D: "deleted",
   R: "renamed",
-  C: "added"
+  C: "added",
+  T: "modified"
 };
 
 /**

@@ -1,9 +1,12 @@
 import { api } from "../api.js";
-import { el, table, section, usageBar, emptyState, notice, formatUsd } from "../dom.js";
+import { el, table, section, usageBar, emptyState, notice, flashNotice, confirmInline, formatUsd } from "../dom.js";
 
-export async function renderBudgets(container) {
+export async function renderBudgets(container, state = {}) {
   const result = await api.budgets();
   const messageSlot = el("div");
+  if (state.flash) {
+    messageSlot.append(flashNotice(state.flash));
+  }
 
   const body =
     result.budgets.length === 0
@@ -12,14 +15,15 @@ export async function renderBudgets(container) {
           ["Provider", { label: "Limit / month", numeric: true }, { label: "Used", numeric: true }, "Usage", { label: "Alert at", numeric: true }, ""],
           result.budgets.map((budget) => {
             const remove = el("button", { class: "quiet-danger", text: "Remove" });
-            remove.addEventListener("click", async () => {
-              if (!window.confirm(`Remove the ${budget.provider} budget?`)) return;
-              try {
-                await api.deleteBudget(budget.provider);
-                await renderBudgets(container);
-              } catch (error) {
-                messageSlot.replaceChildren(notice("error", error.message));
-              }
+            remove.addEventListener("click", (event) => {
+              confirmInline(event.target.closest("td"), async () => {
+                try {
+                  await api.deleteBudget(budget.provider);
+                  await renderBudgets(container, { flash: `${budget.provider} budget removed` });
+                } catch (error) {
+                  messageSlot.replaceChildren(notice("error", error.message));
+                }
+              });
             });
 
             return el("tr", {}, [
@@ -72,12 +76,14 @@ function budgetForm(messageSlot, container) {
     }
 
     submit.disabled = true;
+    submit.textContent = "saving...";
     try {
       await api.createBudget({ provider: provider.value, monthlyLimitUsd, alertThresholdPct });
-      await renderBudgets(container);
+      await renderBudgets(container, { flash: `${provider.value} budget saved` });
     } catch (error) {
       messageSlot.replaceChildren(notice("error", error.message));
       submit.disabled = false;
+      submit.textContent = "Save budget";
     }
   });
 

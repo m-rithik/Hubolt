@@ -19,17 +19,77 @@ model Organization {
   budgets             Budget[]
   apiKeys             ApiKey[]
   providerCredentials ProviderCredential[]
+  findingFeedback     FindingFeedback[]
+  memoryCards         MemoryCard[]
+  reviews             Review[]
+  findings            Finding[]
 
   @@map("organizations")
 }
 
+model FindingFeedback {
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  repoId      String?
+  fingerprint String
+  ruleId      String
+  severity    String
+  category    String?
+
+  verdict String // accepted | dismissed | discussed
+  source  String // github-reaction | github-reply | import
+
+  // Idempotency key for collector sources (e.g. gh:rc:123:+1) so re-imports
+  // of the same reaction or reply never double-count.
+  externalId String?
+
+  actor String?
+  note  String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([orgId, externalId])
+  @@index([orgId, fingerprint])
+  @@index([orgId, ruleId])
+  @@map("finding_feedback")
+}
+
+model MemoryCard {
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  // Empty string rather than NULL for org-scope/non-rule cards: Postgres
+  // treats NULLs as distinct in unique indexes, which would allow duplicates.
+  repoId String @default("")
+  ruleId String @default("")
+
+  kind  String // rule | style
+  title String
+  body  String
+
+  tokensEstimate Int     @default(0)
+  sourceCount    Int     @default(0)
+  // Style cards are maintainer-authored and survive rebuilds.
+  pinned         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, repoId, kind, ruleId])
+  @@index([orgId])
+  @@map("memory_cards")
+}
+
 model OrganizationMember {
-  id    String @id @default(cuid())
+  id    String       @id @default(cuid())
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   userId String
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   role String @default("viewer")
 
@@ -41,8 +101,8 @@ model OrganizationMember {
 }
 
 model User {
-  id    String @id @default(cuid())
-  email String @unique
+  id    String  @id @default(cuid())
+  email String  @unique
   name  String?
 
   orgs OrganizationMember[]
@@ -54,15 +114,15 @@ model User {
 }
 
 model ApiKey {
-  id    String @id @default(cuid())
+  id    String       @id @default(cuid())
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   name       String
-  keyHash    String @unique @db.VarChar(255)
+  keyHash    String    @unique @db.VarChar(255)
   lastUsedAt DateTime?
 
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   expiresAt DateTime?
 
   @@index([keyHash])
@@ -70,7 +130,7 @@ model ApiKey {
 }
 
 model Repository {
-  id    String @id @default(cuid())
+  id    String       @id @default(cuid())
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -82,6 +142,7 @@ model Repository {
   updatedAt DateTime @updatedAt
 
   reviews           Review[]
+  findings          Finding[]
   pullRequestStates PullRequestState[]
 
   @@unique([orgId, fullName])
@@ -90,7 +151,7 @@ model Repository {
 }
 
 model PullRequestState {
-  id     String @id @default(cuid())
+  id     String     @id @default(cuid())
   repoId String
   repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
 
@@ -105,49 +166,63 @@ model PullRequestState {
 }
 
 model Review {
-  id    String @id @default(cuid())
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
   repoId String
-  repo  Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
 
   fingerprint String
   scope       String
   provider    String
   model       String
 
-  summary    String?
-  findingCount Int @default(0)
+  summary      String?
+  findingCount Int     @default(0)
 
   createdAt DateTime @default(now())
 
-  findings         Finding[]
+  findings        Finding[]
   analyzerSignals AnalyzerSignal[]
   modelUsage      ModelUsage[]
 
   @@unique([repoId, fingerprint])
+  @@index([orgId, createdAt])
   @@index([repoId])
   @@index([createdAt])
   @@map("reviews")
 }
 
 model Finding {
-  id       String @id @default(cuid())
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  repoId String
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
   reviewId String
   review   Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
-  ruleId      String
-  message     String
-  severity    String
-  file        String
-  lineStart   Int
-  lineEnd     Int
+  ruleId    String
+  message   String
+  severity  String
+  file      String
+  lineStart Int
+  lineEnd   Int
 
   fingerprint String
-  confidence  Float @default(0.5)
+  confidence  Float  @default(0.5)
 
   createdAt DateTime @default(now())
 
   @@unique([reviewId, fingerprint])
+  @@index([orgId, createdAt])
+  @@index([repoId])
   @@index([reviewId])
+  @@index([fingerprint])
+  @@index([createdAt])
   @@index([severity])
   @@map("findings")
 }
@@ -157,11 +232,11 @@ model AnalyzerSignal {
   reviewId String
   review   Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
-  analyzer String
-  ruleId   String
-  message  String
-  severity String
-  file     String
+  analyzer  String
+  ruleId    String
+  message   String
+  severity  String
+  file      String
   lineStart Int
   lineEnd   Int
 
@@ -181,7 +256,7 @@ model ModelUsage {
   model            String
   inputTokens      Int
   outputTokens     Int
-  estimatedCostUsd Float @default(0)
+  estimatedCostUsd Float  @default(0)
 
   createdAt DateTime @default(now())
 
@@ -190,15 +265,15 @@ model ModelUsage {
 }
 
 model Budget {
-  id    String @id @default(cuid())
+  id    String       @id @default(cuid())
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  provider            String
-  monthlyLimitUsd     Float
-  alertThresholdPct   Int @default(80)
+  provider          String
+  monthlyLimitUsd   Float
+  alertThresholdPct Int    @default(80)
 
-  currentMonthCostUsd Float @default(0)
+  currentMonthCostUsd Float    @default(0)
   currentMonthResets  DateTime
 
   createdAt DateTime @default(now())
@@ -232,25 +307,25 @@ model RateLimitWindow {
   id    String @id @default(cuid())
   orgId String
 
-  provider         String
-  model            String
-  windowStart      DateTime
-  requestCount     Int @default(0)
-  maxRequestsPerDay Int @default(1000)
+  provider          String
+  model             String
+  windowStart       DateTime
+  requestCount      Int      @default(0)
+  maxRequestsPerDay Int      @default(1000)
 
   @@unique([orgId, provider, model, windowStart])
   @@map("rate_limit_windows")
 }
 
 model ProviderCredential {
-  id    String @id @default(cuid())
+  id    String       @id @default(cuid())
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  provider       String
-  keyHash        String @db.VarChar(100)
-  encryptedKey   String
-  lastUsedAt     DateTime?
+  provider     String
+  keyHash      String    @db.VarChar(100)
+  encryptedKey String
+  lastUsedAt   DateTime?
 
   createdAt DateTime @default(now())
 
@@ -266,7 +341,7 @@ model ModelRoute {
   reviewScope String
   provider    String
   model       String
-  priority    Int @default(0)
+  priority    Int    @default(0)
   costLimit   Float?
 
   createdAt DateTime @default(now())
@@ -280,13 +355,13 @@ model GatewayLog {
   id    String @id @default(cuid())
   orgId String
 
-  provider           String
-  model              String
-  promptTokens       Int
-  completionTokens   Int
-  estimatedCostUsd   Float
-  cachedResponse     Boolean @default(false)
-  duration_ms        Int
+  provider         String
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  estimatedCostUsd Float
+  cachedResponse   Boolean @default(false)
+  duration_ms      Int
 
   createdAt DateTime @default(now())
 
@@ -303,7 +378,7 @@ model GatewayBudgetReservation {
   provider         String
   estimatedCostUsd Float
   actualCostUsd    Float?
-  status           String @default("reserved")
+  status           String    @default("reserved")
   settledAt        DateTime?
 
   createdAt DateTime @default(now())

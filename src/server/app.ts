@@ -9,6 +9,8 @@ import { registerAuditRoutes } from "./routes/audit.js";
 import { registerOrgRoutes } from "./routes/orgs.js";
 import { registerBudgetRoutes } from "./routes/budgets.js";
 import { registerRateLimitRoutes } from "./routes/rate-limits.js";
+import { registerFeedbackRoutes } from "./routes/feedback.js";
+import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerGatewayRoutes } from "./routes/gateway.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
@@ -54,6 +56,8 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
   registerOrgRoutes(fastify, context);
   registerBudgetRoutes(fastify, context);
   registerRateLimitRoutes(fastify, context);
+  registerFeedbackRoutes(fastify, context);
+  registerMemoryRoutes(fastify, context);
 
   let gateway: LLMGateway | null = null;
   if (context.redis) {

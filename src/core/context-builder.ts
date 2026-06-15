@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import picomatch from "picomatch";
 import type { RepoConfig } from "../config/schema.js";
@@ -104,6 +104,10 @@ export async function buildContext(options: BuildContextOptions): Promise<BuiltC
         }
       } else {
         try {
+          if (lstatSync(absolute).isSymbolicLink()) {
+            files.push({ path: file.path, status: file.status, changedRanges, skipped: "unreadable" });
+            continue;
+          }
           const stat = statSync(absolute);
           if (!stat.isFile()) {
             // Skip FIFOs, sockets, devices — readFileSync blocks on them indefinitely.

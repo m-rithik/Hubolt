@@ -52,6 +52,62 @@ export function notice(kind, message) {
   return el("div", { class: `notice ${kind}`, text: message });
 }
 
+/** Success feedback that fades out on its own. */
+export function flashNotice(message) {
+  return el("div", { class: "notice ok notice-flash", text: message });
+}
+
+/**
+ * Navigate by hash. `replace` rewrites the current entry (used for filter
+ * typing so each keystroke does not pollute history) and re-routes manually,
+ * since replaceState fires no hashchange.
+ */
+export function setHash(hash, { replace = false } = {}) {
+  if (replace) {
+    history.replaceState(null, "", hash);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  } else {
+    window.location.hash = hash;
+  }
+}
+
+export function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+/**
+ * Inline confirmation in place of window.confirm: swaps the action cell for
+ * "remove? y / n" and resolves with the answer. Esc or n cancels.
+ */
+export function confirmInline(cell, onConfirm) {
+  const previous = [...cell.childNodes];
+  const restore = () => cell.replaceChildren(...previous);
+
+  const yes = el("button", { class: "confirm-yes", text: "y" });
+  const no = el("button", { class: "confirm-no", text: "n" });
+  yes.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onConfirm();
+  });
+  no.addEventListener("click", (event) => {
+    event.stopPropagation();
+    restore();
+  });
+
+  cell.replaceChildren(
+    el("span", { class: "confirm-inline" }, [
+      el("span", { class: "confirm-q", text: "remove?" }),
+      yes,
+      no
+    ])
+  );
+  yes.focus();
+}
+
 export function emptyState(message) {
   return el("div", { class: "empty", text: message });
 }

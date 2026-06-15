@@ -36,6 +36,8 @@ export interface RunPipelineParams {
   config: RepoConfig;
   llm: LLMProvider;
   analyzerSignals?: AnalyzerSignal[];
+  /** Compact team memory cards injected into the prompt, fenced as data. */
+  memory?: string[];
 }
 
 /**
@@ -46,7 +48,7 @@ export async function runReviewPipeline(params: RunPipelineParams): Promise<Revi
   const { context, config, llm } = params;
   const analyzerSignals = params.analyzerSignals ?? [];
 
-  const prompt = buildReviewPrompt(context, config, analyzerSignals);
+  const prompt = buildReviewPrompt(context, config, analyzerSignals, params.memory ?? []);
   let usage: ReviewResult["usage"];
   const raw = await llm.review({
     system: prompt.system,

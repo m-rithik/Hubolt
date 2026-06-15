@@ -3,171 +3,412 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hubolt - context-aware AI code review</title>
-  <meta name="description" content="Local-first, context-aware, evidence-backed AI code review for JavaScript and TypeScript.">
+  <title>Hubolt - AI code review control plane</title>
+  <meta name="description" content="Context-aware AI code review with analyzer evidence, gateway budgets, audit history, and GitHub-ready findings.">
   <link rel="stylesheet" href="/ui/landing/landing.css">
 </head>
 <body>
-
-  <nav class="nav">
-    <div class="nav-logo">
-      <span class="live-dot" aria-hidden="true"></span>
-      HUBOLT
-    </div>
+  <nav class="site-nav" aria-label="Primary">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>HUBOLT</span>
+    </a>
     <div class="nav-links">
-      <a href="#capabilities">CAPABILITIES</a>
-      <a href="#pipeline">PIPELINE</a>
-      <a href="#costs">COSTS</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#costs">Costs</a>
     </div>
-    <a class="nav-cta" href="/ui/">OPEN CONSOLE</a>
+    <a class="nav-action" href="/ui/">Open console</a>
   </nav>
 
-  <header class="hero">
-    <div class="hero-bg" aria-hidden="true">HUBOLT</div>
+  <main>
+    <header class="hero" id="hero">
+      <div class="hero-mesh" aria-hidden="true"></div>
 
-    <div class="cube-stage" aria-hidden="true">
-      <div class="cube">
-        <div class="cube-face">
-          <span class="face-title">REVIEW</span>
-          <span class="face-sub">full-file context, not diff scraps</span>
+      <section class="hero-copy" aria-labelledby="hero-title">
+        <p class="eyebrow">CODE REVIEW CONTROL PLANE</p>
+        <h1 id="hero-title">HUBOLT</h1>
+        <p class="hero-lede">
+          Context-rich reviews, analyzer-backed evidence, routed model spend,
+          and an audit trail that makes every finding traceable.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="/ui/">Open console</a>
+          <a class="button secondary" href="https://github.com/m-rithik/hubolt">GitHub</a>
         </div>
-        <div class="cube-face">
-          <span class="face-title">SECURITY</span>
-          <span class="face-sub">analyzer-first, evidence-backed</span>
+        <div class="hero-strip" aria-label="Product signals">
+          <span>semantic context</span>
+          <span>budget guardrails</span>
+          <span>inline GitHub review</span>
         </div>
-        <div class="cube-face">
-          <span class="face-title">GATEWAY</span>
-          <span class="face-sub">routed models, budgets, audit</span>
+      </section>
+
+      <section class="hero-stage" aria-label="Hubolt product preview">
+        <div class="product-shell" data-tilt-card>
+          <div class="product-top">
+            <div>
+              <span class="window-dot"></span>
+              app.hubolt.local / overview
+            </div>
+            <span>db ok . 18ms</span>
+          </div>
+          <div class="product-grid">
+            <aside class="product-menu" aria-hidden="true">
+              <span class="active">overview</span>
+              <span>reviews</span>
+              <span>budgets</span>
+              <span>gateway</span>
+              <span>audit log</span>
+            </aside>
+            <div class="product-main">
+              <div class="metric-row">
+                <div>
+                  <span class="metric-label">reviews stored</span>
+                  <strong>1,284</strong>
+                </div>
+                <div>
+                  <span class="metric-label">queue active</span>
+                  <strong>12</strong>
+                </div>
+                <div>
+                  <span class="metric-label">month spend</span>
+                  <strong>$428</strong>
+                </div>
+              </div>
+              <div class="review-board">
+                <div class="finding-row active">
+                  <span class="severity high">high</span>
+                  <span>src/server/services/llm-gateway.ts</span>
+                  <strong>budget reconciliation</strong>
+                </div>
+                <div class="finding-row">
+                  <span class="severity medium">medium</span>
+                  <span>src/queue/review-processor.ts</span>
+                  <strong>memory retrieval gap</strong>
+                </div>
+                <div class="finding-row">
+                  <span class="severity low">low</span>
+                  <span>web/js/views/reviews.js</span>
+                  <strong>empty state coverage</strong>
+                </div>
+              </div>
+              <div class="code-panel" aria-hidden="true">
+                <span>160  const reservation = await reserveBudget(input);</span>
+                <span>161  const job = await requestQueue.enqueue(payload);</span>
+                <span class="line-hot">162  const result = await requestQueue.getResult(job.id);</span>
+                <span>163  await reconcileUsage(reservation, result.usage);</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="cube-face">
-          <span class="face-title">GITHUB</span>
-          <span class="face-sub">inline comments on the right lines</span>
+
+        <div class="signal-card card-left" data-float-card>
+          <span class="signal-kicker">Analyzer signal</span>
+          <strong>Secret scanner</strong>
+          <p>Hardcoded credential candidates are promoted only with file evidence and verification notes.</p>
+        </div>
+
+        <div class="signal-card card-right" data-float-card>
+          <span class="signal-kicker">Gateway guardrail</span>
+          <strong>Budget held</strong>
+          <p>Provider spend is reserved, settled, refunded, and audited as separate states.</p>
+        </div>
+      </section>
+    </header>
+
+    <section class="workflow peek" id="workflow">
+      <div class="section-label">How it works</div>
+      <div class="section-headline">
+        <h2>From changed code to a review your team can defend.</h2>
+        <p>
+          Hubolt keeps the model inside a bounded review workflow: gather context,
+          check machine signals, generate findings, and record the outcome.
+        </p>
+      </div>
+      <div class="workflow-scroll-area" data-workflow-track>
+        <div class="workflow-story" data-workflow>
+          <div class="workflow-steps" aria-label="Review workflow steps">
+            <article class="workflow-step is-active" data-workflow-step="0" data-reveal>
+              <span>01 / Intake</span>
+              <h3>Build the review packet.</h3>
+              <p>Hubolt expands the diff with related files, semantic regions, ownership hints, and repository rules.</p>
+              <div class="step-meta" aria-hidden="true">
+                <span>full files</span><span>semantic regions</span><span>repo rules</span>
+              </div>
+            </article>
+            <article class="workflow-step" data-workflow-step="1" data-reveal>
+              <span>02 / Evidence</span>
+              <h3>Run machine checks first.</h3>
+              <p>Analyzers produce grounded signals before the LLM writes a finding, keeping guesses out of the review.</p>
+              <div class="step-meta" aria-hidden="true">
+                <span>typescript</span><span>secret scan</span><span>dependency audit</span>
+              </div>
+            </article>
+            <article class="workflow-step" data-workflow-step="2" data-reveal>
+              <span>03 / Review</span>
+              <h3>Route the model by risk.</h3>
+              <p>Budget gates, provider routing, and rule memories shape the prompt before a finding reaches a reviewer.</p>
+              <div class="step-meta" aria-hidden="true">
+                <span>budget hold</span><span>model route</span><span>memory cards</span>
+              </div>
+            </article>
+            <article class="workflow-step" data-workflow-step="3" data-reveal>
+              <span>04 / Settlement</span>
+              <h3>Write the audit trail.</h3>
+              <p>Usage, final states, posted comments, and reviewer feedback are stored so each review can be traced later.</p>
+              <div class="step-meta" aria-hidden="true">
+                <span>usage ledger</span><span>pr comments</span><span>feedback loop</span>
+              </div>
+            </article>
+          </div>
+
+          <aside class="workflow-console" aria-label="Hubolt review workflow console">
+            <div class="workflow-console-top">
+              <div>
+                <span class="window-dot"></span>
+                review-runner / pull/284
+              </div>
+              <span data-stage-pill>stage 01</span>
+            </div>
+            <div class="workflow-console-body">
+              <div class="workflow-meter" aria-hidden="true">
+                <span></span>
+              </div>
+              <div class="console-stage-list" aria-label="Pipeline stages">
+                <span class="is-active" data-console-stage="0">
+                  <b>Context</b>
+                  <em>14 files mapped</em>
+                </span>
+                <span data-console-stage="1">
+                  <b>Analyzers</b>
+                  <em>7 signals checked</em>
+                </span>
+                <span data-console-stage="2">
+                  <b>LLM pass</b>
+                  <em>risk route selected</em>
+                </span>
+                <span data-console-stage="3">
+                  <b>Audit</b>
+                  <em>usage reconciled</em>
+                </span>
+              </div>
+
+              <div class="console-scene-frame" aria-live="polite">
+                <div class="console-scene context-scene is-active" data-console-output="0">
+                  <div class="scene-head">
+                    <span>Context map</span>
+                    <strong>Review packet assembled</strong>
+                    <p>Changed code is connected to contracts, tests, and budget services before the model sees it.</p>
+                    <div class="scene-io" aria-hidden="true"><b>pull request diff</b><i>-&gt;</i><b>review packet</b></div>
+                  </div>
+                  <div class="context-map" aria-hidden="true">
+                    <span class="node node-main">llm-gateway.ts</span>
+                    <span class="node">request-queue.ts</span>
+                    <span class="node">billing-service.ts</span>
+                    <span class="node">gateway-budget.test.ts</span>
+                    <span class="node">model-catalog.ts</span>
+                  </div>
+                  <div class="scene-stat-row">
+                    <span><b>14</b> files mapped</span>
+                    <span><b>6</b> contracts linked</span>
+                    <span><b>3</b> rules recalled</span>
+                  </div>
+                  <div class="scene-detail-grid" aria-hidden="true">
+                    <span><b>entrypoint</b><em>pull request 284</em></span>
+                    <span><b>scope</b><em>gateway queue and budget path</em></span>
+                    <span><b>prompt guard</b><em>reviewed code treated as untrusted data</em></span>
+                  </div>
+                </div>
+
+                <div class="console-scene analyzer-scene" data-console-output="1">
+                  <div class="scene-head">
+                    <span>Evidence layer</span>
+                    <strong>Machine checks gate the review</strong>
+                    <p>Signals are grouped by confidence so the model argues from evidence instead of vibes.</p>
+                    <div class="scene-io" aria-hidden="true"><b>review packet</b><i>-&gt;</i><b>evidence signals</b></div>
+                  </div>
+                  <div class="analyzer-board" aria-hidden="true">
+                    <div>
+                      <span>secret scan</span>
+                      <b class="bar hot"></b>
+                      <em>3 candidates</em>
+                    </div>
+                    <div>
+                      <span>TypeScript</span>
+                      <b class="bar cool"></b>
+                      <em>clean</em>
+                    </div>
+                    <div>
+                      <span>dependency audit</span>
+                      <b class="bar warn"></b>
+                      <em>1 advisory</em>
+                    </div>
+                    <div>
+                      <span>rule memory</span>
+                      <b class="bar cool"></b>
+                      <em>3 cards</em>
+                    </div>
+                  </div>
+                  <div class="evidence-finding">
+                    <span>promoted finding</span>
+                    <strong>authorization header requires verification notes</strong>
+                  </div>
+                </div>
+
+                <div class="console-scene route-scene" data-console-output="2">
+                  <div class="scene-head">
+                    <span>Model route</span>
+                    <strong>Risk controls choose the pass</strong>
+                    <p>Budget is held before the provider call, then the route is selected from repository risk.</p>
+                    <div class="scene-io" aria-hidden="true"><b>packet + signals</b><i>-&gt;</i><b>model findings</b></div>
+                  </div>
+                  <div class="route-board" aria-hidden="true">
+                    <div class="route-lane">
+                      <span>fast</span>
+                      <b>skip</b>
+                      <em>low risk</em>
+                    </div>
+                    <div class="route-lane selected">
+                      <span>balanced</span>
+                      <b>selected</b>
+                      <em>gateway code</em>
+                    </div>
+                    <div class="route-lane">
+                      <span>thorough</span>
+                      <b>hold</b>
+                      <em>security critical</em>
+                    </div>
+                  </div>
+                  <div class="budget-ticket">
+                    <span>budget reservation</span>
+                    <strong>$0.18 held</strong>
+                    <em>refund only after terminal failure</em>
+                  </div>
+                  <div class="scene-detail-grid" aria-hidden="true">
+                    <span><b>queue state</b><em>active job tracked through result polling</em></span>
+                    <span><b>provider</b><em>bounded by organization policy</em></span>
+                    <span><b>fallback</b><em>no spend recorded until settlement</em></span>
+                  </div>
+                </div>
+
+                <div class="console-scene audit-scene" data-console-output="3">
+                  <div class="scene-head">
+                    <span>Traceable result</span>
+                    <strong>Review output becomes an audit record</strong>
+                    <p>Usage, final states, posted comments, and reviewer feedback stay tied to the same run.</p>
+                    <div class="scene-io" aria-hidden="true"><b>findings + usage</b><i>-&gt;</i><b>audit record + pr review</b></div>
+                  </div>
+                  <div class="audit-receipt" aria-hidden="true">
+                    <span><b>reserved</b><em>gateway_budget_reservation</em></span>
+                    <span><b>settled</b><em>provider_usage_reconciled</em></span>
+                    <span><b>posted</b><em>github_review_comment</em></span>
+                  </div>
+                  <div class="github-comment">
+                    <span>GitHub review</span>
+                    <strong>1 high-confidence finding posted with file evidence</strong>
+                  </div>
+                  <div class="scene-detail-grid" aria-hidden="true">
+                    <span><b>monthly budget</b><em>reservation converted to actual cost</em></span>
+                    <span><b>audit event</b><em>final queue state and provider usage linked</em></span>
+                    <span><b>team memory</b><em>feedback feeds future rule calibration</em></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="console-feed" aria-label="Workflow event log">
+                <span class="is-active" data-feed-line="0">00:00 ingest diff from pull request 284</span>
+                <span data-feed-line="0">00:02 expand llm-gateway.ts with queue contracts</span>
+                <span data-feed-line="1">00:05 secret scanner marks credential-like values as candidates</span>
+                <span data-feed-line="1">00:07 TypeScript and dependency audit complete</span>
+                <span data-feed-line="2">00:10 reserve budget before provider call</span>
+                <span data-feed-line="2">00:14 generate findings with file evidence and confidence</span>
+                <span data-feed-line="3">00:18 reconcile usage and write audit event</span>
+                <span data-feed-line="3">00:20 post GitHub-ready review summary</span>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="hero-copy">
-      <h1>CODE REVIEW<br>THAT EARNS TRUST</h1>
-      <p>
-        Local-first, context-aware AI review for JavaScript and TypeScript.
-        Findings come with evidence, verification steps, and the restraint
-        to stay quiet when there is nothing worth saying.
-      </p>
-      <div class="hero-actions">
-        <a class="btn-gradient" href="/ui/">OPEN CONSOLE</a>
-        <a class="btn-ghost" href="https://github.com/m-rithik/hubolt">GITHUB</a>
+    <section class="surfaces" id="surfaces">
+      <div class="surface-copy">
+        <div class="section-label">Control surfaces</div>
+        <h2>A console for the review loop, not a marketing dashboard.</h2>
+        <p>
+          The web UI keeps the active work close: recent reviews, queue pressure,
+          provider credentials, budget limits, and organization audit history.
+        </p>
       </div>
-    </div>
-  </header>
+      <div class="surface-stack" aria-label="Hubolt control surfaces">
+        <article>
+          <span class="stack-index">A</span>
+          <h3>Review detail</h3>
+          <p>Findings, analyzer signals, confidence, model usage, and file locations in one scan path.</p>
+        </article>
+        <article>
+          <span class="stack-index">B</span>
+          <h3>Gateway routing</h3>
+          <p>Provider credentials stay encrypted, queue state is visible, and model catalog pricing is explicit.</p>
+        </article>
+        <article>
+          <span class="stack-index">C</span>
+          <h3>Budget controls</h3>
+          <p>Monthly caps and alert thresholds are managed per provider without exposing stored secrets.</p>
+        </article>
+      </div>
+    </section>
 
-  <section class="capabilities" id="capabilities">
-    <h2 class="giant">CAPABILITIES</h2>
-
-    <div class="terminal" id="pipeline">
-      <div class="terminal-bar">
-        <span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span>
-        <span class="terminal-title">hubolt review --staged</span>
+    <section class="costs" id="costs">
+      <div class="section-label">Gateway costs</div>
+      <div class="costs-grid">
+        <div>
+          <h2>Route by risk. Keep spend visible.</h2>
+          <p>
+            Estimate monthly review cost using the gateway catalog rates and
+            a context-heavy planning figure of 60k tokens per review.
+          </p>
+        </div>
+        <div class="calculator">
+          <div class="calc-head">
+            <span>Balanced route estimate</span>
+            <strong id="calc-price">$54</strong>
+          </div>
+          <input type="range" id="calc-range" min="10" max="2000" step="10" value="300" aria-label="Reviews per month">
+          <div class="calc-row">
+            <span id="calc-count">300 reviews / month</span>
+            <span id="calc-alt">fast $1.35 . thorough $90</span>
+          </div>
+        </div>
       </div>
-      <pre class="terminal-body"><span class="t-prompt">$</span> hubolt review --staged
-
-  <span class="t-dim">context</span>    4 changed files . full-file + semantic regions
-  <span class="t-dim">analyzers</span>  typescript . eslint . secrets . dependency-audit
-  <span class="t-dim">model</span>      claude-sonnet-4-6 via gateway
-
-  <span class="t-crit">critical</span>  src/api/users.ts:42   sql-injection
-            user input interpolated into a SQL string without parameterization
-  <span class="t-high">high</span>      src/api/admin.ts:18   missing-auth-check
-            route handler mutates state before verifying the session
-  <span class="t-med">medium</span>    src/db/reports.ts:77  unbounded-query
-            findMany without take can return the whole table
-
-  <span class="t-ok">3 findings</span> . 11 dropped below threshold . report written to review.json</pre>
-    </div>
-
-    <div class="cap-grid">
-      <div class="cap-card">
-        <span class="cap-label">01 / CONTEXT</span>
-        <h3>WHOLE FILES, NOT HUNKS</h3>
-        <p>Reviews load full changed files, tree-sitter semantic regions, and
-        directly related code. Diff-only review is too shallow to trust.</p>
+      <div class="tier-row">
+        <article class="tier">
+          <span>Fast</span>
+          <strong>gemini-2.0-flash</strong>
+          <p>$0.000075 / 1k tokens</p>
+        </article>
+        <article class="tier featured">
+          <span>Balanced</span>
+          <strong>claude-sonnet-4-6</strong>
+          <p>$0.003 / 1k tokens</p>
+        </article>
+        <article class="tier">
+          <span>Thorough</span>
+          <strong>claude-opus-4-8</strong>
+          <p>$0.005 / 1k tokens</p>
+        </article>
       </div>
-      <div class="cap-card">
-        <span class="cap-label">02 / EVIDENCE</span>
-        <h3>ANALYZER-BACKED FINDINGS</h3>
-        <p>TypeScript, ESLint, Semgrep, secret and dependency scanners run
-        first. The model triages signals instead of inventing them.</p>
-      </div>
-      <div class="cap-card">
-        <span class="cap-label">03 / GATEWAY</span>
-        <h3>ROUTED, BUDGETED, AUDITED</h3>
-        <p>A hosted gateway routes each review to the right model, enforces
-        monthly budgets per provider, and writes an audit trail.</p>
-      </div>
-      <div class="cap-card">
-        <span class="cap-label">04 / GITHUB</span>
-        <h3>COMMENTS ON THE RIGHT LINES</h3>
-        <p>Webhook-driven reviews post one summary that updates in place,
-        inline comments mapped to the diff, and suggestion blocks for fixes.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="costs" id="costs">
-    <div class="costs-glow" aria-hidden="true"></div>
-    <h2 class="giant">GATEWAY COSTS</h2>
-    <p class="costs-sub">Real per-model pricing from the gateway catalog. Pick a lane per review scope.</p>
-
-    <div class="tier-row">
-      <div class="tier glass">
-        <span class="tier-label">FAST</span>
-        <div class="tier-model">gemini-2.0-flash</div>
-        <div class="tier-price">$0.000075<span>/1k tokens</span></div>
-        <p>Sweeps and drafts. Quality 8, lowest latency.</p>
-      </div>
-      <div class="tier featured">
-        <span class="tier-label">BALANCED</span>
-        <div class="tier-model">claude-sonnet-4-6</div>
-        <div class="tier-price">$0.003<span>/1k tokens</span></div>
-        <p>The default route for standard reviews. Quality 8.</p>
-      </div>
-      <div class="tier glass">
-        <span class="tier-label">THOROUGH</span>
-        <div class="tier-model">claude-opus-4-8</div>
-        <div class="tier-price">$0.005<span>/1k tokens</span></div>
-        <p>Security scope routes here. Quality 10.</p>
-      </div>
-    </div>
-
-    <div class="calc">
-      <div class="calc-head">
-        <span class="cap-label">ESTIMATE / MONTH</span>
-        <div class="calc-price" id="calc-price">$54</div>
-        <div class="calc-note">on the balanced route, at ~60k tokens per review</div>
-      </div>
-      <input type="range" id="calc-range" min="10" max="2000" step="10" value="300" aria-label="Reviews per month">
-      <div class="calc-row">
-        <span id="calc-count">300 reviews / month</span>
-        <span class="calc-alt" id="calc-alt">fast $1.35 . thorough $90</span>
-      </div>
-    </div>
-  </section>
+    </section>
+  </main>
 
   <footer class="footer">
-    <div class="footer-giant" aria-hidden="true">HUBOLT</div>
-    <div class="footer-row">
-      <div class="footer-col">
-        <span class="cap-label">PROJECT</span>
-        <a href="https://github.com/m-rithik/hubolt">GitHub</a>
-        <a href="/ui/">Control panel</a>
-      </div>
-      <div class="footer-col">
-        <span class="cap-label">BUILT FOR</span>
-        <span class="footer-text">JavaScript . TypeScript . Node . React</span>
-      </div>
-      <div class="footer-col">
-        <span class="cap-label">LICENSE</span>
-        <span class="footer-text">Apache-2.0 . local-first, not local-only</span>
-      </div>
+    <div>
+      <span class="brand-text">HUBOLT</span>
+      <p>Local-first, context-aware AI review for JavaScript and TypeScript teams.</p>
+    </div>
+    <div class="footer-links">
+      <a href="/ui/">Control panel</a>
+      <a href="https://github.com/m-rithik/hubolt">GitHub</a>
     </div>
   </footer>
 

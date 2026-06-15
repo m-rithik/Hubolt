@@ -1,7 +1,7 @@
 import { api } from "../api.js";
-import { el, table, section, statStrip, emptyState, emptyWithCommand, notice, formatCount, formatDate } from "../dom.js";
+import { el, table, section, statStrip, emptyState, emptyWithCommand, notice, flashNotice, confirmInline, formatCount, formatDate } from "../dom.js";
 
-export async function renderGateway(container) {
+export async function renderGateway(container, state = {}) {
   let status;
   try {
     const result = await api.gatewayStatus();
@@ -23,6 +23,9 @@ export async function renderGateway(container) {
   }
 
   const messageSlot = el("div");
+  if (state.flash) {
+    messageSlot.append(flashNotice(state.flash));
+  }
 
   const credentialsBody =
     status.configuredProviders.length === 0
@@ -31,14 +34,15 @@ export async function renderGateway(container) {
           ["Provider", "Last used", ""],
           status.configuredProviders.map((entry) => {
             const remove = el("button", { class: "quiet-danger", text: "Remove" });
-            remove.addEventListener("click", async () => {
-              if (!window.confirm(`Remove the stored ${entry.provider} key?`)) return;
-              try {
-                await api.removeCredential(entry.provider);
-                await renderGateway(container);
-              } catch (error) {
-                messageSlot.replaceChildren(notice("error", error.message));
-              }
+            remove.addEventListener("click", (event) => {
+              confirmInline(event.target.closest("td"), async () => {
+                try {
+                  await api.removeCredential(entry.provider);
+                  await renderGateway(container, { flash: `${entry.provider} key removed` });
+                } catch (error) {
+                  messageSlot.replaceChildren(notice("error", error.message));
+                }
+              });
             });
             return el("tr", {}, [
               el("td", { text: entry.provider }),
@@ -123,13 +127,15 @@ function credentialForm(messageSlot, container) {
     }
 
     submit.disabled = true;
+    submit.textContent = "storing...";
     try {
       await api.configureCredential(provider.value, value);
       key.value = "";
-      await renderGateway(container);
+      await renderGateway(container, { flash: `${provider.value} key stored (encrypted)` });
     } catch (error) {
       messageSlot.replaceChildren(notice("error", error.message));
       submit.disabled = false;
+      submit.textContent = "Store key";
     }
   });
 

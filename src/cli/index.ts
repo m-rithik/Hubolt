@@ -7,10 +7,12 @@ import { registerAuditCommand } from "./commands/audit.js";
 import { registerCacheCommand } from "./commands/cache.js";
 import { registerConfigCommand } from "./commands/config.js";
 import { registerEvalCommand } from "./commands/eval.js";
+import { registerFeedbackCommand } from "./commands/feedback.js";
 import { registerGatewayCommand } from "./commands/gateway.js";
 import { registerGitHubCommand } from "./commands/github.js";
 import { registerHistoryCommand } from "./commands/history.js";
 import { registerLogsCommand } from "./commands/logs.js";
+import { registerMemoryCommand } from "./commands/memory.js";
 import { registerProvidersCommand } from "./commands/providers.js";
 import { registerPushReportCommand } from "./commands/push-report.js";
 import { registerReportCommand } from "./commands/report.js";
@@ -46,6 +48,8 @@ registerWorkerCommand(program);
 registerHistoryCommand(program);
 registerGatewayCommand(program);
 registerAuditCommand(program);
+registerFeedbackCommand(program);
+registerMemoryCommand(program);
 configureCliHelp(program);
 
 program.action(() => {

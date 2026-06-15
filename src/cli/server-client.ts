@@ -77,6 +77,42 @@ export async function serverGet<T = unknown>(
   return payload as T;
 }
 
+export async function serverPost<T = unknown>(
+  connection: ServerConnection,
+  path: string,
+  body: unknown,
+  fetchImpl: typeof fetch = fetch
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${connection.serverUrl}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${connection.apiKey}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new ServerRequestError(`Server unreachable at ${connection.serverUrl}`, 0);
+  }
+
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // Empty body is acceptable for some endpoints.
+  }
+
+  if (!response.ok) {
+    const parsed = payload as { error?: string; message?: string } | null;
+    const message = parsed?.error || parsed?.message || `Request failed (${response.status})`;
+    throw new ServerRequestError(message, response.status);
+  }
+
+  return payload as T;
+}
+
 /** GET returning the raw body, for non-JSON formats such as CSV exports. */
 export async function serverGetText(
   connection: ServerConnection,

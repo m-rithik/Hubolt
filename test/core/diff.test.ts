@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { parseUnifiedDiff } from "../../src/core/diff.js";
+import { parseNameStatus } from "../../src/core/git.js";
 
 describe("parseUnifiedDiff", () => {
   test("collects added line ranges on the new side", () => {
@@ -66,6 +67,14 @@ describe("parseUnifiedDiff", () => {
     expect(parseUnifiedDiff(diff)).toEqual([
       { path: "one.ts", changedRanges: [{ startLine: 1, endLine: 1 }] },
       { path: "two.ts", changedRanges: [{ startLine: 1, endLine: 1 }] }
+    ]);
+  });
+});
+
+describe("parseNameStatus", () => {
+  test("treats git type changes as modified files", () => {
+    expect(parseNameStatus("T\tsrc/keep.ts\n")).toEqual([
+      { path: "src/keep.ts", status: "modified" }
     ]);
   });
 });

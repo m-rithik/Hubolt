@@ -48,7 +48,7 @@ export async function renderOverview(container) {
           ["Repository", "Provider", "Model", { label: "Findings", numeric: true }, "Created"],
           reviewsResult.value.reviews.map((review) =>
             el("tr", { class: "clickable", onclick: () => { window.location.hash = `#/reviews/${review.id}`; } }, [
-              el("td", { class: "cell-link", text: review.repository }),
+              el("td", {}, el("a", { class: "cell-link", href: `#/reviews/${review.id}`, text: review.repository })),
               el("td", { class: "dim", text: review.provider }),
               el("td", { class: "mono dim", text: review.model }),
               el("td", { class: "num", text: String(review.findingCount) }),

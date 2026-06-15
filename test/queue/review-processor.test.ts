@@ -80,6 +80,17 @@ function makeDb(stateHeadSha: string | null) {
       auditEvent: {
         create: vi.fn(async () => undefined)
       },
+      finding: {
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => [])
+      },
+      findingFeedback: {
+        groupBy: vi.fn(async () => []),
+        createMany: vi.fn(async (args: any) => ({ count: args.data.length }))
+      },
+      memoryCard: {
+        findMany: vi.fn(async () => [])
+      },
       $transaction: vi.fn(async (callback: any) => callback(tx))
     } as any
   };
@@ -150,13 +161,16 @@ describe("processReviewJob", () => {
       expect.objectContaining({
         where: {
           repoId_fingerprint: { repoId: "repo_1", fingerprint: "pr-7-headsha123" }
-        }
+        },
+        create: expect.objectContaining({ orgId: "org_1", repoId: "repo_1" })
       })
     );
     expect(tx.finding.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: [
           expect.objectContaining({
+            orgId: "org_1",
+            repoId: "repo_1",
             reviewId: "review_1",
             file: "src/a.ts",
             severity: "high"
@@ -241,6 +255,172 @@ describe("processReviewJob", () => {
       })
     );
     expect(db.pullRequestState.upsert).toHaveBeenCalled();
+  });
+
+  test("demotes findings whose rule the team consistently dismisses", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    db.findingFeedback.groupBy = vi.fn(async (args: any) =>
+      args.by.includes("ruleId")
+        ? [{ ruleId: "no-raw-input", verdict: "dismissed", _count: { _all: 6 } }]
+        : []
+    );
+
+    // A quality/medium finding: not covered by the security/critical
+    // exemptions, so rule-level feedback may demote it.
+    const outcome = await processReviewJob(JOB, {
+      db,
+      createScm: () => scm,
+      createLlm: () => makeLlm([{ ...llmFinding(), category: "quality", severity: "medium" }])
+    });
+
+    // The finding moves to the summary: nothing inline, reason in the body.
+    expect(outcome).toMatchObject({ status: "completed", findingCount: 1, suppressedByFeedback: 0 });
+    expect(scm.createReview).not.toHaveBeenCalled();
+    const summaryBody = (scm.createIssueComment as any).mock.calls[0][1];
+    expect(summaryBody).toContain("rule dismissed 6 times across reviews");
+  });
+
+  test("injects retrieved memory cards into the prompt and reports usage", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    db.memoryCard.findMany = vi.fn(async () => [
+      {
+        id: "card1",
+        repoId: "",
+        ruleId: "",
+        kind: "style",
+        title: "conventions",
+        body: "prefer zod validation at api boundaries",
+        tokensEstimate: 12,
+        sourceCount: 0,
+        pinned: true,
+        updatedAt: new Date()
+      }
+    ]);
+
+    let seenUser = "";
+    const llm = {
+      name: "fake",
+      review: vi.fn(async (request: any) => {
+        seenUser = request.user;
+        return [];
+      })
+    } as any;
+
+    const outcome = await processReviewJob(JOB, {
+      db,
+      createScm: () => scm,
+      createLlm: () => llm
+    });
+
+    expect(outcome).toMatchObject({ status: "completed", memoryCardsUsed: 1 });
+    expect(seenUser).toContain("kind=teamMemory");
+    expect(seenUser).toContain("prefer zod validation at api boundaries");
+  });
+
+  test("retrieves rule-calibration memory from prior repository findings", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    db.finding.findMany = vi.fn(async () => [{ ruleId: "no-raw-input" }]);
+    db.memoryCard.findMany = vi.fn(async () => [
+      {
+        id: "card1",
+        repoId: "",
+        ruleId: "no-raw-input",
+        kind: "rule",
+        title: "no-raw-input calibration",
+        body: "the team usually acts on no-raw-input findings",
+        tokensEstimate: 12,
+        sourceCount: 5,
+        pinned: false,
+        updatedAt: new Date()
+      }
+    ]);
+
+    let seenUser = "";
+    const llm = {
+      name: "fake",
+      review: vi.fn(async (request: any) => {
+        seenUser = request.user;
+        return [];
+      })
+    } as any;
+
+    const outcome = await processReviewJob(JOB, {
+      db,
+      createScm: () => scm,
+      createLlm: () => llm
+    });
+
+    expect(outcome).toMatchObject({ status: "completed", memoryCardsUsed: 1 });
+    expect(db.finding.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          orgId: "org_1",
+          repoId: "repo_1"
+        },
+        select: { ruleId: true }
+      })
+    );
+    expect(seenUser).toContain("kind=teamMemory");
+    expect(seenUser).toContain("the team usually acts on no-raw-input findings");
+  });
+
+  test("collects PR feedback before reviewing", async () => {
+    const marker = "<!-- hubolt:finding:fp-old -->";
+    const scm = makeScm({
+      listReviewComments: vi.fn(async () => [
+        {
+          id: 9,
+          body: `old finding\n${marker}`,
+          path: "src/a.ts",
+          line: 2,
+          inReplyTo: null,
+          authorIsBot: true,
+          reactions: { up: 1, down: 0 }
+        }
+      ])
+    });
+    const { db } = makeDb(null);
+    db.finding.findMany = vi.fn(async (args: any) =>
+      args.where?.fingerprint
+        ? [
+            {
+              id: "f-old",
+              fingerprint: "fp-old",
+              ruleId: "rule-old",
+              severity: "low",
+              orgId: "org_1",
+              repoId: "repo_1",
+              createdAt: new Date("2026-01-01T00:00:00.000Z")
+            }
+          ]
+        : []
+    );
+
+    const outcome = await processReviewJob(JOB, {
+      db,
+      createScm: () => scm,
+      createLlm: () => makeLlm()
+    });
+
+    expect(outcome).toMatchObject({ status: "completed", feedbackCollected: 1 });
+    expect(db.finding.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          fingerprint: { in: ["fp-old"] },
+          orgId: "org_1",
+          repoId: "repo_1"
+        }
+      })
+    );
+    expect(db.findingFeedback.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ fingerprint: "fp-old", verdict: "accepted" })],
+        skipDuplicates: true
+      })
+    );
   });
 
   test("honors repository config fetched from the PR head", async () => {

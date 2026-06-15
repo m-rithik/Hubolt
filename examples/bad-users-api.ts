@@ -4,7 +4,7 @@
 
 import { db } from "./db";
 
-const API_TOKEN = "sk_live_9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c"; // hardcoded secret
+const API_TOKEN = process.env.API_TOKEN;
 
 export async function getUsers(req: any, res: any) {
   // No pagination: loads the entire table into memory.

@@ -282,6 +282,23 @@ describe("LLMGateway", () => {
     );
   });
 
+  test("trims credentials before storing and rejects whitespace-only credentials", async () => {
+    const gateway = makeGateway();
+    gateway.credentialManager.storeCredential = vi.fn().mockResolvedValue(undefined);
+
+    await gateway.configureCredential("org_1", "openai", "  valid-api-key-123  ");
+    expect(gateway.credentialManager.storeCredential).toHaveBeenLastCalledWith(
+      "org_1",
+      "openai",
+      "valid-api-key-123"
+    );
+
+    await expect(gateway.configureCredential("org_1", "openai", "          ")).rejects.toMatchObject({
+      field: "apiKey"
+    });
+    expect(gateway.credentialManager.storeCredential).toHaveBeenCalledTimes(1);
+  });
+
   test("removes credentials", async () => {
     const gateway = makeGateway();
     gateway.credentialManager.deleteCredential = vi.fn().mockResolvedValue(undefined);

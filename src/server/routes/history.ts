@@ -90,6 +90,93 @@ interface GetReviewResponse {
 export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerContext): void {
   const authMiddleware = createAuthMiddleware(context.db);
 
+  fastify.get(
+    "/history/trends",
+    { preHandler: authMiddleware },
+    async (request: AuthenticatedRequest, reply: FastifyReply) => {
+      if (!isAuthenticated(request)) {
+        reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+
+      try {
+        const { days: daysRaw } = request.query as { days?: string };
+        const days = Math.min(Math.max(Number.parseInt(daysRaw ?? "30", 10) || 30, 1), 365);
+        const since = new Date(Date.now() - days * 86400000);
+        const orgScope = { orgId: request.orgId!, createdAt: { gte: since } };
+
+        const [reviewCount, severityRows, categoryRows, verdictRows, ruleRows] = await Promise.all([
+          context.db.review.count({
+            where: orgScope
+          }),
+          context.db.finding.groupBy({
+            by: ["severity"],
+            where: orgScope,
+            _count: { _all: true }
+          }),
+          context.db.finding.groupBy({
+            by: ["ruleId"],
+            where: orgScope,
+            _count: { _all: true },
+            orderBy: { _count: { ruleId: "desc" } },
+            take: 10
+          }),
+          context.db.findingFeedback.groupBy({
+            by: ["verdict"],
+            where: { orgId: request.orgId!, createdAt: { gte: since } },
+            _count: { _all: true }
+          }),
+          context.db.findingFeedback.groupBy({
+            by: ["ruleId", "verdict"],
+            where: { orgId: request.orgId!, createdAt: { gte: since } },
+            _count: { _all: true }
+          })
+        ]);
+
+        const bySeverity: Record<string, number> = {};
+        for (const row of severityRows) bySeverity[row.severity] = row._count._all;
+
+        const feedback: Record<string, number> = { accepted: 0, dismissed: 0, discussed: 0 };
+        for (const row of verdictRows) feedback[row.verdict] = row._count._all;
+
+        const resolved = feedback.accepted + feedback.dismissed;
+        const acceptanceRate = resolved > 0 ? feedback.accepted / resolved : null;
+
+        const ruleFeedback = new Map<string, { accepted: number; dismissed: number }>();
+        for (const row of ruleRows) {
+          const entry = ruleFeedback.get(row.ruleId) ?? { accepted: 0, dismissed: 0 };
+          if (row.verdict === "accepted") entry.accepted += row._count._all;
+          if (row.verdict === "dismissed") entry.dismissed += row._count._all;
+          ruleFeedback.set(row.ruleId, entry);
+        }
+
+        reply.send({
+          days,
+          reviews: reviewCount,
+          findings: {
+            total: Object.values(bySeverity).reduce((sum, n) => sum + n, 0),
+            bySeverity
+          },
+          feedback: { ...feedback, acceptanceRate },
+          topRules: categoryRows.map((row) => {
+            const fb = ruleFeedback.get(row.ruleId) ?? { accepted: 0, dismissed: 0 };
+            const total = fb.accepted + fb.dismissed;
+            return {
+              ruleId: row.ruleId,
+              findings: row._count._all,
+              accepted: fb.accepted,
+              dismissed: fb.dismissed,
+              acceptanceRate: total > 0 ? fb.accepted / total : null
+            };
+          })
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        reply.status(500).send({ error: "Failed to compute trends" });
+      }
+    }
+  );
+
   fastify.get<{ Querystring: z.infer<typeof ListReviewsQuerySchema>; Reply: ListReviewsResponse }>(
     "/history/reviews",
     { preHandler: authMiddleware },
@@ -103,13 +190,14 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         const query = ListReviewsQuerySchema.parse(request.query);
 
         const where: any = {
-          repo: {
-            orgId: request.orgId
-          }
+          orgId: request.orgId
         };
 
         if (query.repo) {
-          where.repo.fullName = { contains: query.repo, mode: "insensitive" };
+          where.repo = { fullName: { contains: query.repo, mode: "insensitive" } };
+        }
+        if (query.severity) {
+          where.findings = { some: { severity: query.severity } };
         }
 
         const total = await context.db.review.count({ where });
@@ -184,7 +272,7 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         const review = await context.db.review.findFirst({
           where: {
             id,
-            repo: { orgId: request.orgId }
+            orgId: request.orgId
           },
           include: {
             repo: true,

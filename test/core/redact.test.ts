@@ -82,6 +82,12 @@ describe("redactSecrets", () => {
     expect(redactSecrets(input)).toEqual({ text: input, count: 0 });
   });
 
+  test("does not redact author metadata as auth credentials", () => {
+    const input = 'authorLogin: "alice"';
+
+    expect(redactSecrets(input)).toEqual({ text: input, count: 0 });
+  });
+
   test("redacts well-known token shapes anywhere in a line", () => {
     const { text } = redactSecrets(wrappedCall(MOCK_GITHUB_PAT));
 
@@ -194,6 +200,22 @@ describe("scanSecrets", () => {
 
   test("does not report interpolated template references as hardcoded secrets", () => {
     expect(scanSecrets('headers.authorization = `Bearer ${key}`;')).toEqual([]);
+  });
+
+  test("does not report author metadata as hardcoded credentials", () => {
+    expect(scanSecrets('authorLogin: "alice"')).toEqual([]);
+  });
+
+  test("still reports literal authorization header assignments", () => {
+    const headerName = ["authori", "zation"].join("");
+
+    expect(scanSecrets(`${headerName}: "Bearer example-token-value"`)).toEqual([
+      {
+        line: 1,
+        ruleId: "secret.hardcoded-credential",
+        message: 'Possible hardcoded secret assigned to "authorization".'
+      }
+    ]);
   });
 
   test("flags a private key body on the right line", () => {

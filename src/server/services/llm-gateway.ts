@@ -348,11 +348,12 @@ export class LLMGateway {
   }
 
   async configureCredential(orgId: string, provider: string, apiKey: string): Promise<void> {
+    const normalizedApiKey = typeof apiKey === "string" ? apiKey.trim() : apiKey;
     this.validator.validateOrgId(orgId);
     this.validator.validateProvider(provider);
-    this.validator.validateApiKey(apiKey);
+    this.validator.validateApiKey(normalizedApiKey);
 
-    await this.credentialManager.storeCredential(orgId, provider, apiKey);
+    await this.credentialManager.storeCredential(orgId, provider, normalizedApiKey);
   }
 
   async removeCredential(orgId: string, provider: string): Promise<void> {

@@ -1,10 +1,18 @@
 import { api } from "../api.js";
-import { el, table, section, severityBadge, emptyState, emptyWithCommand, timeCell, formatDate, formatUsd } from "../dom.js";
+import { el, table, section, severityBadge, emptyState, emptyWithCommand, timeCell, setHash, debounce, formatDate, formatUsd } from "../dom.js";
 
 const PAGE_SIZE = 20;
 
+function reviewsHash({ repo, offset }) {
+  const query = new URLSearchParams();
+  if (repo) query.set("repo", repo);
+  if (offset > 0) query.set("offset", String(offset));
+  const suffix = query.toString();
+  return suffix ? `#/reviews?${suffix}` : "#/reviews";
+}
+
 export async function renderReviews(container, state = {}) {
-  const offset = state.offset || 0;
+  const offset = Number.parseInt(state.offset, 10) || 0;
   const repo = state.repo || "";
 
   const result = await api.reviews({ limit: PAGE_SIZE, offset, repo: repo || undefined });
@@ -14,9 +22,13 @@ export async function renderReviews(container, state = {}) {
     placeholder: "Filter by repository",
     value: repo
   });
-  filterInput.addEventListener("change", () => {
-    renderReviews(container, { offset: 0, repo: filterInput.value.trim() });
-  });
+  // Live filtering; replace history so typing does not stack entries.
+  filterInput.addEventListener(
+    "input",
+    debounce(() => {
+      setHash(reviewsHash({ repo: filterInput.value.trim(), offset: 0 }), { replace: true });
+    }, 300)
+  );
 
   const card = el("div", { class: "section" });
   const parts = [el("div", { class: "toolbar" }, [filterInput]), card];
@@ -36,7 +48,7 @@ export async function renderReviews(container, state = {}) {
         ["Repository", "Provider", "Model", { label: "Findings", numeric: true }, "Created"],
         result.reviews.map((review) =>
           el("tr", { class: "clickable", onclick: () => { window.location.hash = `#/reviews/${review.id}`; } }, [
-            el("td", { class: "cell-link", text: review.repository }),
+            el("td", {}, el("a", { class: "cell-link", href: `#/reviews/${review.id}`, text: review.repository })),
             el("td", { class: "dim", text: review.provider }),
             el("td", { class: "mono dim", text: review.model }),
             el("td", { class: "num", text: String(review.findingCount) }),
@@ -54,21 +66,28 @@ export async function renderReviews(container, state = {}) {
     prev.disabled = offset === 0;
     next.disabled = to >= total;
     prev.addEventListener("click", () =>
-      renderReviews(container, { offset: Math.max(0, offset - PAGE_SIZE), repo })
+      setHash(reviewsHash({ repo, offset: Math.max(0, offset - PAGE_SIZE) }))
     );
-    next.addEventListener("click", () => renderReviews(container, { offset: offset + PAGE_SIZE, repo }));
+    next.addEventListener("click", () => setHash(reviewsHash({ repo, offset: offset + PAGE_SIZE })));
 
     card.append(el("div", { class: "pager" }, [`${from}-${to} of ${total}`, prev, next]));
   }
 
   container.replaceChildren(...parts);
+
+  // Re-focus the filter when the rerender came from typing in it.
+  if (repo && document.activeElement === document.body) {
+    const end = filterInput.value.length;
+    filterInput.focus();
+    filterInput.setSelectionRange(end, end);
+  }
 }
 
-export async function renderReviewDetail(container, id) {
+export async function renderReviewDetail(container, id, backHref = "#/reviews") {
   const review = await api.review(id);
 
   const head = el("div", { class: "detail-head" }, [
-    el("a", { class: "back", href: "#/reviews", text: "Back to reviews" })
+    el("a", { class: "back", href: backHref, text: "Back to reviews" })
   ]);
 
   const summary = el("dl", { class: "kv" }, [

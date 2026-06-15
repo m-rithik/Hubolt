@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -62,6 +62,29 @@ describe("buildContext", () => {
     const big = built.files.find((file) => file.path === "src/big.ts");
     expect(big?.skipped).toBe("too-large");
     expect(built.reviewable.map((file) => file.path)).not.toContain("src/big.ts");
+  });
+
+  test("does not read working-tree symlink targets outside the repository", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const outside = join(tmpdir(), `hubolt-outside-${Date.now()}.txt`);
+    writeFileSync(outside, "outside secret material\n");
+    rmSync(join(dir, "src/keep.ts"));
+    symlinkSync(outside, join(dir, "src/keep.ts"));
+
+    try {
+      const config = RepoConfigSchema.parse({});
+      const built = await buildContext({ cwd: dir, config });
+
+      const linked = built.files.find((file) => file.path === "src/keep.ts");
+      expect(linked?.skipped).toBe("unreadable");
+      expect(built.reviewable.map((file) => file.path)).not.toContain("src/keep.ts");
+      expect(built.files.some((file) => file.content?.includes("outside secret material"))).toBe(false);
+    } finally {
+      rmSync(outside, { force: true });
+    }
   });
 
   test("enforces maxContextTokens across the whole context, first-fit", async () => {
