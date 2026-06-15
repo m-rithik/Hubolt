@@ -334,28 +334,97 @@
     <section class="surfaces" id="surfaces">
       <div class="surface-copy">
         <div class="section-label">Control surfaces</div>
-        <h2>A console for the review loop, not a marketing dashboard.</h2>
+        <h2>An operations console for the review loop.</h2>
         <p>
-          The web UI keeps the active work close: recent reviews, queue pressure,
-          provider credentials, budget limits, and organization audit history.
+          The web panel keeps active work one glance away: recent reviews,
+          queue pressure, provider credentials, budget limits, and audit history.
         </p>
       </div>
-      <div class="surface-stack" aria-label="Hubolt control surfaces">
-        <article>
-          <span class="stack-index">A</span>
-          <h3>Review detail</h3>
-          <p>Findings, analyzer signals, confidence, model usage, and file locations in one scan path.</p>
-        </article>
-        <article>
-          <span class="stack-index">B</span>
-          <h3>Gateway routing</h3>
-          <p>Provider credentials stay encrypted, queue state is visible, and model catalog pricing is explicit.</p>
-        </article>
-        <article>
-          <span class="stack-index">C</span>
-          <h3>Budget controls</h3>
-          <p>Monthly caps and alert thresholds are managed per provider without exposing stored secrets.</p>
-        </article>
+      <div class="surface-console">
+        <div class="surface-tabs" role="tablist" aria-label="Hubolt control surfaces">
+          <button class="surface-tab is-active" role="tab" id="surf-tab-a" aria-controls="surf-panel-a" aria-selected="true" tabindex="0">
+            <span class="stack-index">A</span>
+            <span class="surface-tab-title">Review detail</span>
+          </button>
+          <button class="surface-tab" role="tab" id="surf-tab-b" aria-controls="surf-panel-b" aria-selected="false" tabindex="-1">
+            <span class="stack-index">B</span>
+            <span class="surface-tab-title">Gateway routing</span>
+          </button>
+          <button class="surface-tab" role="tab" id="surf-tab-c" aria-controls="surf-panel-c" aria-selected="false" tabindex="-1">
+            <span class="stack-index">C</span>
+            <span class="surface-tab-title">Budget controls</span>
+          </button>
+        </div>
+
+        <div class="surface-preview">
+          <div class="surface-panel is-active" role="tabpanel" id="surf-panel-a" aria-labelledby="surf-tab-a">
+            <p class="sp-caption">Findings, analyzer signals, confidence, model usage, and file locations in one scan path.</p>
+            <div class="sp-head" aria-hidden="true"><b>review-runner / pull/284</b><span>3 findings</span></div>
+            <div class="sp-rows" aria-hidden="true">
+              <div class="sp-row">
+                <span class="sp-chip sev-high">high</span>
+                <span class="sp-row-main"><b>Auth header used before verification</b><em>llm-gateway.ts:134 - high confidence - hybrid</em></span>
+              </div>
+              <div class="sp-row">
+                <span class="sp-chip sev-medium">med</span>
+                <span class="sp-row-main"><b>Query result is unbounded</b><em>request-queue.ts:88 - medium confidence - analyzer</em></span>
+              </div>
+              <div class="sp-row">
+                <span class="sp-chip sev-low">low</span>
+                <span class="sp-row-main"><b>Prefer const assertion</b><em>model-catalog.ts:12 - low confidence - llm</em></span>
+              </div>
+            </div>
+            <div class="sp-foot" aria-hidden="true"><span>claude-sonnet-4-6</span><span>18.2k tokens - $0.06</span></div>
+          </div>
+
+          <div class="surface-panel" role="tabpanel" id="surf-panel-b" aria-labelledby="surf-tab-b" hidden>
+            <p class="sp-caption">Provider credentials stay encrypted, queue state is visible, and model catalog pricing is explicit.</p>
+            <div class="sp-rows" aria-hidden="true">
+              <div class="sp-row">
+                <span class="sp-row-main"><b>anthropic</b><em>key encrypted at rest - used 2h ago</em></span>
+                <span class="sp-chip ok">stored</span>
+              </div>
+              <div class="sp-row">
+                <span class="sp-row-main"><b>openai</b><em>key encrypted at rest - used 1d ago</em></span>
+                <span class="sp-chip ok">stored</span>
+              </div>
+            </div>
+            <div class="sp-queue" aria-hidden="true">
+              <span><b>2</b>waiting</span>
+              <span><b>1</b>active</span>
+              <span><b>184</b>completed</span>
+            </div>
+            <div class="sp-rows" aria-hidden="true">
+              <div class="sp-row">
+                <span class="sp-row-main"><b>claude-sonnet-4-6</b><em>anthropic - quality 9</em></span>
+                <span class="sp-price">$0.003 / 1k</span>
+              </div>
+              <div class="sp-row">
+                <span class="sp-row-main"><b>gemini-2.0-flash</b><em>google - quality 6</em></span>
+                <span class="sp-price">$0.000075 / 1k</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="surface-panel" role="tabpanel" id="surf-panel-c" aria-labelledby="surf-tab-c" hidden>
+            <p class="sp-caption">Monthly caps and alert thresholds are managed per provider without exposing stored secrets.</p>
+            <div class="sp-rows" aria-hidden="true">
+              <div class="sp-budget">
+                <div class="sp-budget-head"><b>anthropic</b><span>$42 / $100</span></div>
+                <div class="sp-bar" style="--alert:80%"><i style="width:42%"></i></div>
+              </div>
+              <div class="sp-budget">
+                <div class="sp-budget-head"><b>openai</b><span>$18 / $50</span></div>
+                <div class="sp-bar" style="--alert:80%"><i style="width:36%"></i></div>
+              </div>
+              <div class="sp-budget">
+                <div class="sp-budget-head"><b>google</b><span>$3 / $25</span></div>
+                <div class="sp-bar" style="--alert:80%"><i style="width:12%"></i></div>
+              </div>
+            </div>
+            <div class="sp-foot" aria-hidden="true"><span>alert threshold</span><span>80% of monthly cap</span></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -371,7 +440,7 @@
         </div>
         <div class="calculator">
           <div class="calc-head">
-            <span>Balanced route estimate</span>
+            <span id="calc-route-label">Balanced route estimate</span>
             <strong id="calc-price">$54</strong>
           </div>
           <input type="range" id="calc-range" min="10" max="2000" step="10" value="300" aria-label="Reviews per month">
@@ -381,22 +450,22 @@
           </div>
         </div>
       </div>
-      <div class="tier-row">
-        <article class="tier">
+      <div class="tier-row" role="group" aria-label="Cost route">
+        <button type="button" class="tier" data-route="fast" aria-pressed="false">
           <span>Fast</span>
           <strong>gemini-2.0-flash</strong>
           <p>$0.000075 / 1k tokens</p>
-        </article>
-        <article class="tier featured">
+        </button>
+        <button type="button" class="tier featured" data-route="balanced" aria-pressed="true">
           <span>Balanced</span>
           <strong>claude-sonnet-4-6</strong>
           <p>$0.003 / 1k tokens</p>
-        </article>
-        <article class="tier">
+        </button>
+        <button type="button" class="tier" data-route="thorough" aria-pressed="false">
           <span>Thorough</span>
           <strong>claude-opus-4-8</strong>
           <p>$0.005 / 1k tokens</p>
-        </article>
+        </button>
       </div>
     </section>
   </main>

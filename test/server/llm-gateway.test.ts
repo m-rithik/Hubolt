@@ -23,6 +23,9 @@ function makeGateway(overrides: Record<string, unknown> = {}) {
       create: vi.fn().mockResolvedValue(undefined),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined)
+    },
+    gatewayLog: {
+      groupBy: vi.fn().mockResolvedValue([])
     }
   };
   gateway.db = db;
@@ -316,6 +319,33 @@ describe("LLMGateway", () => {
     expect(status).toHaveProperty("configuredProviders");
     expect(status).toHaveProperty("queueStatus");
     expect(status).toHaveProperty("availableModels");
+    expect(status).toHaveProperty("usage");
+  });
+
+  test("aggregates token and cost usage per provider", async () => {
+    const gateway = makeGateway();
+    gateway.db.gatewayLog.groupBy.mockResolvedValue([
+      {
+        provider: "openai",
+        _count: { _all: 2 },
+        _sum: { promptTokens: 100, completionTokens: 40, estimatedCostUsd: 0.02, duration_ms: 300 }
+      },
+      {
+        provider: "anthropic",
+        _count: { _all: 1 },
+        _sum: { promptTokens: 50, completionTokens: 10, estimatedCostUsd: 0.03, duration_ms: 600 }
+      }
+    ]);
+
+    const usage = await gateway.getUsageSummary("org_1");
+
+    expect(usage.requests).toBe(3);
+    expect(usage.inputTokens).toBe(150);
+    expect(usage.outputTokens).toBe(50);
+    expect(usage.totalTokens).toBe(200);
+    expect(usage.costUsd).toBeCloseTo(0.05);
+    expect(usage.avgDurationMs).toBe(300); // (300 + 600) / 3
+    expect(usage.byProvider).toHaveLength(2);
   });
 
   test("handles missing budget reservation on job completion", async () => {

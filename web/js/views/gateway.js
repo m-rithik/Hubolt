@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { el, table, section, statStrip, emptyState, emptyWithCommand, notice, flashNotice, confirmInline, formatCount, formatDate } from "../dom.js";
+import { el, table, section, statStrip, emptyState, emptyWithCommand, notice, flashNotice, confirmInline, formatCount, formatUsd, formatDate } from "../dom.js";
 
 export async function renderGateway(container, state = {}) {
   let status;
@@ -72,8 +72,58 @@ export async function renderGateway(container, state = {}) {
     }
   }
 
+  const usage = status.usage ?? {
+    requests: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    avgDurationMs: 0,
+    byProvider: []
+  };
+
+  const usageSection = section(
+    "Usage",
+    "Input/output token and cost totals across all gateway requests.",
+    usage.requests === 0
+      ? emptyState("No gateway requests recorded yet.")
+      : [
+          statStrip([
+            { value: formatCount(usage.inputTokens), label: "Input tokens" },
+            { value: formatCount(usage.outputTokens), label: "Output tokens" },
+            { value: formatCount(usage.totalTokens), label: "Total tokens" },
+            { value: formatUsd(usage.costUsd), label: "Est. cost" },
+            { value: formatCount(usage.requests), label: "Requests" },
+            { value: `${formatCount(usage.avgDurationMs)} ms`, label: "Avg latency" }
+          ]),
+          el(
+            "div",
+            { style: "margin-top:16px" },
+            table(
+              [
+                "Provider",
+                { label: "Requests", numeric: true },
+                { label: "Input tokens", numeric: true },
+                { label: "Output tokens", numeric: true },
+                { label: "Cost", numeric: true }
+              ],
+              usage.byProvider.map((p) =>
+                el("tr", {}, [
+                  el("td", { class: "dim", text: p.provider }),
+                  el("td", { class: "num", text: formatCount(p.requests) }),
+                  el("td", { class: "num", text: formatCount(p.inputTokens) }),
+                  el("td", { class: "num", text: formatCount(p.outputTokens) }),
+                  el("td", { class: "num", text: formatUsd(p.costUsd) })
+                ])
+              )
+            )
+          )
+        ]
+  );
+
   container.replaceChildren(
     messageSlot,
+    usageSection,
     section(
       "Provider credentials",
       "Keys are encrypted at rest and never shown after saving.",

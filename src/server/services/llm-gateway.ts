@@ -336,6 +336,7 @@ export class LLMGateway {
     const creds = await this.credentialManager.listCredentials(orgId);
     const stats = await this.requestQueue.getQueueStats();
     const models = this.modelRouter.listAvailableModels();
+    const usage = await this.getUsageSummary(orgId);
 
     return {
       configuredProviders: creds.map((c) => ({
@@ -343,7 +344,57 @@ export class LLMGateway {
         lastUsed: c.lastUsedAt
       })),
       queueStatus: stats,
-      availableModels: models
+      availableModels: models,
+      usage
+    };
+  }
+
+  // Token and cost totals aggregated from the gateway_logs table, broken down
+  // per provider. ponytail: one groupBy + JS reduce; promote to a SQL view if
+  // the log table grows past what a single aggregate query handles cheaply.
+  async getUsageSummary(orgId: string) {
+    this.validator.validateOrgId(orgId);
+
+    const groups = await (this.db as any).gatewayLog.groupBy({
+      by: ["provider"],
+      where: { orgId },
+      _sum: {
+        promptTokens: true,
+        completionTokens: true,
+        estimatedCostUsd: true,
+        duration_ms: true
+      },
+      _count: { _all: true }
+    });
+
+    const byProvider = groups.map((g: any) => ({
+      provider: g.provider,
+      requests: g._count?._all ?? 0,
+      inputTokens: g._sum?.promptTokens ?? 0,
+      outputTokens: g._sum?.completionTokens ?? 0,
+      costUsd: g._sum?.estimatedCostUsd ?? 0
+    }));
+
+    const totals = byProvider.reduce(
+      (acc: { requests: number; inputTokens: number; outputTokens: number; costUsd: number; durationMs: number }, p: any, i: number) => {
+        acc.requests += p.requests;
+        acc.inputTokens += p.inputTokens;
+        acc.outputTokens += p.outputTokens;
+        acc.costUsd += p.costUsd;
+        acc.durationMs += groups[i]._sum?.duration_ms ?? 0;
+        return acc;
+      },
+      { requests: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 }
+    );
+
+    return {
+      requests: totals.requests,
+      inputTokens: totals.inputTokens,
+      outputTokens: totals.outputTokens,
+      totalTokens: totals.inputTokens + totals.outputTokens,
+      costUsd: totals.costUsd,
+      avgDurationMs: totals.requests > 0 ? Math.round(totals.durationMs / totals.requests) : 0,
+      byProvider
     };
   }
 

@@ -1,5 +1,8 @@
 const RATE_PER_1K = { fast: 0.000075, balanced: 0.003, thorough: 0.005 };
+const ROUTE_LABEL = { fast: "Fast", balanced: "Balanced", thorough: "Thorough" };
+const ROUTE_ORDER = ["fast", "balanced", "thorough"];
 const TOKENS_PER_REVIEW = 60000;
+let activeRoute = "balanced";
 
 const siteNav = document.querySelector(".site-nav");
 const productShell = document.querySelector(".product-shell");
@@ -25,6 +28,8 @@ function usd(value) {
   });
 }
 
+const routeLabel = document.getElementById("calc-route-label");
+
 function updateCalculator() {
   if (!range || !price || !count || !alt) return;
 
@@ -32,10 +37,31 @@ function updateCalculator() {
   const tokens = (reviews * TOKENS_PER_REVIEW) / 1000;
   const percent = ((reviews - Number(range.min)) / (Number(range.max) - Number(range.min))) * 100;
 
-  price.textContent = usd(tokens * RATE_PER_1K.balanced);
+  price.textContent = usd(tokens * RATE_PER_1K[activeRoute]);
   count.textContent = `${reviews.toLocaleString()} reviews / month`;
-  alt.textContent = `fast ${usd(tokens * RATE_PER_1K.fast)} . thorough ${usd(tokens * RATE_PER_1K.thorough)}`;
+  alt.textContent = ROUTE_ORDER
+    .filter((route) => route !== activeRoute)
+    .map((route) => `${route} ${usd(tokens * RATE_PER_1K[route])}`)
+    .join("   .   ");
+  if (routeLabel) routeLabel.textContent = `${ROUTE_LABEL[activeRoute]} route estimate`;
   range.style.setProperty("--fill", `${percent}%`);
+}
+
+function startRouteTiers() {
+  const tiers = [...document.querySelectorAll(".tier[data-route]")];
+  if (tiers.length === 0) return;
+
+  tiers.forEach((tier) => {
+    tier.addEventListener("click", () => {
+      activeRoute = tier.dataset.route;
+      tiers.forEach((other) => {
+        const on = other === tier;
+        other.classList.toggle("featured", on);
+        other.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      updateCalculator();
+    });
+  });
 }
 
 function updateProductPointer(event) {
@@ -60,6 +86,50 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+// Scroll-linked motion is eased toward its target each frame instead of
+// snapping to the raw scroll position, so wheel/trackpad steps glide.
+const MOTION_SMOOTHING = 0.16;
+const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const renderedMotion = { zoom: 1, drift: 0, progress: 25 };
+const targetMotion = { zoom: 1, drift: 0, progress: 25 };
+let motionFrame = null;
+
+function applyMotion() {
+  workflowRoot.style.setProperty("--workflow-zoom", renderedMotion.zoom.toFixed(3));
+  workflowRoot.style.setProperty("--float-drift", `${renderedMotion.drift.toFixed(1)}px`);
+  workflowRoot.style.setProperty("--workflow-progress", `${renderedMotion.progress.toFixed(2)}%`);
+}
+
+function tickMotion() {
+  let settled = true;
+  for (const key of ["zoom", "drift", "progress"]) {
+    const diff = targetMotion[key] - renderedMotion[key];
+    const epsilon = key === "zoom" ? 0.0005 : 0.05;
+    if (Math.abs(diff) < epsilon) {
+      renderedMotion[key] = targetMotion[key];
+    } else {
+      renderedMotion[key] += diff * MOTION_SMOOTHING;
+      settled = false;
+    }
+  }
+  applyMotion();
+  motionFrame = settled ? null : window.requestAnimationFrame(tickMotion);
+}
+
+function setMotionTarget(zoom, drift, progress) {
+  targetMotion.zoom = zoom;
+  targetMotion.drift = drift;
+  targetMotion.progress = progress;
+  if (prefersReducedMotion) {
+    Object.assign(renderedMotion, targetMotion);
+    applyMotion();
+    return;
+  }
+  if (motionFrame === null) {
+    motionFrame = window.requestAnimationFrame(tickMotion);
+  }
+}
+
 function setWorkflowStage(index, stageProgress = 0, overallProgress) {
   if (!workflowRoot || workflowSteps.length === 0) return;
 
@@ -68,14 +138,14 @@ function setWorkflowStage(index, stageProgress = 0, overallProgress) {
   const progress = typeof overallProgress === "number"
     ? clamp(overallProgress, 0, 1) * 100
     : ((boundedIndex + 1) / workflowSteps.length) * 100;
-  const zoom = 1.045 - (boundedStageProgress * 0.075);
+  // Stay at or below 1 so the will-change layer is only ever downscaled;
+  // upscaling a cached layer is what made the frame blurry at scroll start.
+  const zoom = 1 - (boundedStageProgress * 0.045);
   const floatDrift = (boundedStageProgress - 0.5) * 18;
 
   workflowRoot.classList.remove("stage-0", "stage-1", "stage-2", "stage-3");
   workflowRoot.classList.add(`stage-${boundedIndex}`);
-  workflowRoot.style.setProperty("--workflow-progress", `${progress}%`);
-  workflowRoot.style.setProperty("--workflow-zoom", zoom.toFixed(3));
-  workflowRoot.style.setProperty("--float-drift", `${floatDrift.toFixed(1)}px`);
+  setMotionTarget(zoom, floatDrift, progress);
   if (stagePill) {
     stagePill.textContent = `stage ${String(boundedIndex + 1).padStart(2, "0")}`;
   }
@@ -193,6 +263,72 @@ function startRevealObserver() {
   });
 }
 
+function startSurfaceTabs() {
+  const tablist = document.querySelector(".surface-tabs");
+  if (!tablist) return;
+
+  const tabs = [...tablist.querySelectorAll("[role=tab]")];
+  const panels = tabs.map((tab) => document.getElementById(tab.getAttribute("aria-controls")));
+  if (tabs.length === 0) return;
+
+  let active = 0;
+  let cycle = null;
+  let userLocked = false;
+
+  function select(index, focus) {
+    active = (index + tabs.length) % tabs.length;
+    tabs.forEach((tab, i) => {
+      const on = i === active;
+      tab.classList.toggle("is-active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      const panel = panels[i];
+      if (panel) {
+        panel.classList.toggle("is-active", on);
+        panel.hidden = !on;
+      }
+    });
+    if (focus) tabs[active].focus();
+  }
+
+  function stopCycle() {
+    if (cycle) {
+      window.clearInterval(cycle);
+      cycle = null;
+    }
+  }
+
+  function startCycle() {
+    if (userLocked || cycle || prefersReducedMotion) return;
+    cycle = window.setInterval(() => select(active + 1), 4500);
+  }
+
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => {
+      userLocked = true;
+      stopCycle();
+      select(i);
+    });
+    tab.addEventListener("keydown", (event) => {
+      const next = event.key === "ArrowRight" || event.key === "ArrowDown";
+      const prev = event.key === "ArrowLeft" || event.key === "ArrowUp";
+      if (!next && !prev) return;
+      event.preventDefault();
+      userLocked = true;
+      stopCycle();
+      select(active + (next ? 1 : -1), true);
+    });
+  });
+
+  // Auto-advance keeps the section alive until the visitor takes over.
+  tablist.addEventListener("pointerenter", stopCycle);
+  tablist.addEventListener("pointerleave", startCycle);
+  tablist.addEventListener("focusin", stopCycle);
+
+  select(0);
+  startCycle();
+}
+
 if (siteNav) {
   siteNav.addEventListener("animationend", () => siteNav.classList.add("nav-settled"), { once: true });
 }
@@ -209,6 +345,8 @@ if (range) {
 }
 
 updateCalculator();
+startRouteTiers();
 startFindingCycle();
 startWorkflowScroll();
 startRevealObserver();
+startSurfaceTabs();

@@ -812,7 +812,7 @@ h2 {
 .workflow-story {
   --stage-accent: 141, 244, 255;
   --stage-accent-strong: #8df4ff;
-  --workflow-zoom: 1.04;
+  --workflow-zoom: 1;
   --float-drift: 0px;
   position: sticky;
   top: 42px;
@@ -852,8 +852,8 @@ h2 {
   align-content: space-between;
   display: grid;
   gap: 14px;
-  margin-left: -18px;
-  margin-right: -16px;
+  margin-left:-70px;
+  margin-right: 12px;
   padding-left: 24px;
   padding-top: 8px;
   padding-bottom: 8px;
@@ -915,8 +915,8 @@ h2 {
 
 .workflow-step {
   position: relative;
-  min-height: 88px;
-  padding: 15px 18px;
+  min-height: 78px;
+  padding: 12px 15px;
   cursor: pointer;
   transform: translateY(14px);
   opacity: 0.42;
@@ -952,7 +952,7 @@ h2 {
   box-shadow: 0 30px 90px rgba(2, 9, 35, 0.42), 0 0 0 1px rgba(var(--stage-accent), 0.14);
   filter: none;
   opacity: 1;
-  transform: translateX(10px) scale(1.035);
+  transform: translateX(4px) scale(1.02);
   z-index: 2;
 }
 
@@ -975,7 +975,7 @@ h2 {
 
 .workflow-step.is-active:hover {
   opacity: 1;
-  transform: translateX(14px) scale(1.045);
+  transform: translateX(6px) scale(1.025);
 }
 
 .workflow-step span,
@@ -1157,7 +1157,8 @@ h2 {
   height: 100%;
   background: linear-gradient(90deg, rgb(var(--stage-accent)), #f8fbff);
   border-radius: inherit;
-  transition: width 260ms ease;
+  /* ponytail: scroll-driven width tracks scroll directly; a transition would
+     chase the moving value and stutter. */
 }
 
 .console-stage-list {
@@ -1229,7 +1230,11 @@ h2 {
     rgba(2, 9, 35, 0.42);
   transform: scale(var(--workflow-zoom));
   transform-origin: center;
-  transition: transform 180ms ease, background-color 240ms ease, border-color 240ms ease;
+  /* Zoom is scroll-driven, so it must track the scroll position frame-for-frame.
+     A transition here restarts every frame against a moving target and reads as
+     jitter; only the discrete stage color swaps are transitioned. */
+  transition: background-color 240ms ease, border-color 240ms ease;
+  will-change: transform;
 }
 
 .console-scene-frame::before {
@@ -1489,20 +1494,31 @@ h2 {
   color: rgb(var(--stage-accent));
 }
 
+/* Anchored as a full-width footer log so it reads as a labelled section
+   instead of pills floating in the empty bottom-right corner. */
 .console-feed {
   display: grid;
   gap: 8px;
   position: absolute;
-  right: clamp(12px, 2vw, 24px);
-  bottom: clamp(12px, 2vw, 24px);
+  left: clamp(18px, 2.4vw, 28px);
+  right: clamp(18px, 2.4vw, 28px);
+  bottom: clamp(16px, 2vw, 24px);
   z-index: 3;
-  width: min(520px, calc(100% - 32px));
-  padding: 0;
-  border: 0;
+  padding-top: 14px;
+  border-top: 1px solid rgba(221, 236, 255, 0.14);
   background: transparent;
   font-family: var(--mono);
   font-size: 11px;
   pointer-events: none;
+}
+
+.console-feed::before {
+  content: "event log";
+  color: rgba(217, 232, 251, 0.5);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .console-feed span {
@@ -1531,47 +1547,16 @@ h2 {
   transform: translateY(0);
 }
 
-.console-feed span.is-active + span.is-active {
-  transform: translateX(-18px);
-}
 
 .surfaces {
   display: grid;
-  grid-template-columns: minmax(300px, 0.74fr) minmax(0, 1fr);
-  gap: clamp(30px, 7vw, 92px);
+  grid-template-columns: minmax(280px, 0.62fr) minmax(0, 1fr);
+  gap: clamp(30px, 6vw, 80px);
   align-items: center;
 }
 
 .surface-copy h2 {
   margin-bottom: 24px;
-}
-
-.surface-stack {
-  display: grid;
-  gap: 12px;
-}
-
-.surface-stack article {
-  display: grid;
-  grid-template-columns: 54px 1fr;
-  gap: 4px 16px;
-  padding: 20px;
-  transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
-}
-
-.surface-stack article:hover {
-  background: rgba(22, 96, 204, 0.38);
-  border-color: rgba(111, 244, 255, 0.48);
-  box-shadow: 0 24px 72px rgba(0, 91, 255, 0.28);
-  transform: translateX(-6px);
-}
-
-.surface-stack h3 {
-  margin: 0;
-}
-
-.surface-stack p {
-  grid-column: 2;
 }
 
 .stack-index {
@@ -1581,6 +1566,228 @@ h2 {
   height: 38px;
   border: 1px solid rgba(111, 244, 255, 0.42);
   color: var(--green);
+}
+
+/* Interactive control-surface console: tabs select a live depiction. */
+.surface-console {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(6, 34, 98, 0.42);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  overflow: hidden;
+}
+
+.surface-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.surface-tab {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--paper-2);
+  background: rgba(4, 22, 70, 0.62);
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color 180ms ease, background-color 180ms ease;
+}
+
+.surface-tab .stack-index {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+  font-weight: 800;
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease;
+}
+
+.surface-tab-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.surface-tab:hover {
+  color: var(--paper);
+  background: rgba(22, 96, 204, 0.34);
+}
+
+.surface-tab.is-active {
+  color: var(--paper);
+  background: rgba(22, 96, 204, 0.48);
+}
+
+.surface-tab.is-active .stack-index {
+  color: #03113f;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.surface-tab:focus-visible {
+  outline: 2px solid rgba(111, 244, 255, 0.72);
+  outline-offset: -2px;
+}
+
+.surface-preview {
+  position: relative;
+  padding: 20px;
+  min-height: 326px;
+}
+
+.surface-panel { display: none; }
+
+.surface-panel.is-active {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  animation: scene-swap 320ms ease both;
+}
+
+.sp-caption {
+  margin: 0 0 4px;
+  color: var(--paper-2);
+  font-size: 0.96rem;
+}
+
+.sp-head,
+.sp-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.sp-head b { color: var(--paper); }
+
+.sp-rows { display: grid; gap: 8px; }
+
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(221, 236, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(2, 9, 35, 0.4);
+}
+
+.sp-row-main {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-row-main b {
+  color: var(--paper);
+  font-size: 13px;
+}
+
+.sp-row-main em {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 11px;
+}
+
+.sp-chip {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sev-high { color: #ffd9d0; background: rgba(241, 119, 98, 0.22); border: 1px solid rgba(241, 119, 98, 0.5); }
+.sev-medium { color: #ffe6bd; background: rgba(239, 182, 95, 0.2); border: 1px solid rgba(239, 182, 95, 0.46); }
+.sev-low { color: #cde6ff; background: rgba(111, 244, 255, 0.16); border: 1px solid rgba(111, 244, 255, 0.4); }
+.sp-chip.ok { color: #cdeaff; background: rgba(111, 244, 255, 0.14); border: 1px solid rgba(111, 244, 255, 0.36); }
+
+.sp-price {
+  flex-shrink: 0;
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.sp-queue {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.sp-queue span {
+  padding: 10px 12px;
+  border: 1px solid rgba(221, 236, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(2, 9, 35, 0.4);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.sp-queue b {
+  display: block;
+  color: var(--paper);
+  font-size: 18px;
+}
+
+.sp-budget {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(221, 236, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(2, 9, 35, 0.4);
+}
+
+.sp-budget-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.sp-budget-head b { color: var(--paper); }
+
+.sp-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(248, 251, 255, 0.1);
+}
+
+.sp-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--blue-2), var(--green));
+}
+
+/* Alert threshold marker at --alert along the track. */
+.sp-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--alert, 80%);
+  width: 2px;
+  background: rgba(239, 182, 95, 0.9);
 }
 
 .costs {
@@ -1678,9 +1885,19 @@ h2 {
 }
 
 .tier {
+  width: 100%;
   padding: 20px;
+  color: var(--paper);
   background: rgba(6, 34, 98, 0.42);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.tier:focus-visible {
+  outline: 2px solid rgba(111, 244, 255, 0.72);
+  outline-offset: 3px;
 }
 
 .tier:hover {
@@ -1913,6 +2130,15 @@ h2 {
   .footer {
     width: calc(100% - 24px);
   }
+
+  .surface-tab {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .surface-tab-title { font-size: 12px; }
 
   .workflow-step,
   .surface-stack article,
