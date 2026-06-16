@@ -54,6 +54,15 @@ describe("collectPrFeedback", () => {
     ]);
   });
 
+  test("carries the replier's repo role through to the event", () => {
+    const events = collectPrFeedback([
+      comment({ id: 100, body: findingMarker("fp-abc"), authorIsBot: true }),
+      comment({ id: 101, inReplyTo: 100, body: "good catch", authorLogin: "maint", authorRole: "MEMBER" })
+    ]);
+
+    expect(events[0]).toMatchObject({ verdict: "discussed", actor: "maint", role: "MEMBER" });
+  });
+
   test("ignores unmarked comments and replies to them", () => {
     const events = collectPrFeedback([
       comment({ id: 200, body: "just a human comment", reactions: { up: 5, down: 0 } }),

@@ -1,6 +1,6 @@
 import { PrismaClient } from "../../generated/prisma/index.js";
 import { buildRuleCards, estimateCardTokens, type MemoryCardData, type RuleAggregate } from "../../memory/cards.js";
-import { retrieveCards, type RetrievedCard } from "../../memory/retrieval.js";
+import { retrieveCards, RETRIEVAL_BUDGET_TOKENS, type RetrievedCard } from "../../memory/retrieval.js";
 import { EMPTY_FEEDBACK_STATS } from "../../memory/feedback-types.js";
 
 export type StoredMemoryCard = MemoryCardData & { id: string; updatedAt: Date };
@@ -11,7 +11,6 @@ export interface RebuildResult {
   styleCardsKept: number;
 }
 
-const RETRIEVAL_BUDGET_TOKENS = 1200;
 const MEMORY_KEY_SEPARATOR = "\u0000";
 
 export class MemoryService {

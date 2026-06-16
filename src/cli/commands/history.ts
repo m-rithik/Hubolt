@@ -16,6 +16,7 @@ interface TrendsResponse {
   reviews: number;
   findings: { total: number; bySeverity: Record<string, number> };
   feedback: { accepted: number; dismissed: number; discussed: number; acceptanceRate: number | null };
+  topCategories: Array<{ category: string; findings: number }>;
   topRules: Array<{
     ruleId: string;
     findings: number;
@@ -97,6 +98,14 @@ async function runHistory(options: HistoryOptions): Promise<void> {
     if (severities.length > 0) {
       console.log("");
       console.log(ui.grid(["Severity", "Findings"], severities.map(([sev, n]) => [sev, String(n)])));
+    }
+
+    if (trends.topCategories?.length > 0) {
+      console.log("");
+      console.log(ui.grid(
+        ["Category", "Findings"],
+        trends.topCategories.map((row) => [row.category, String(row.findings)])
+      ));
     }
 
     if (trends.topRules.length > 0) {

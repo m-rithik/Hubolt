@@ -298,6 +298,7 @@ async function persistReview(
     ruleId: string;
     message: string;
     severity: string;
+    category?: string;
     range: { file: string; startLine: number; endLine: number };
   }>,
   config: RepoConfig
@@ -338,6 +339,7 @@ async function persistReview(
           ruleId: finding.ruleId,
           message: finding.message,
           severity: finding.severity,
+          category: finding.category ?? null,
           file: finding.range.file,
           lineStart: finding.range.startLine,
           lineEnd: finding.range.endLine,

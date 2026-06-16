@@ -35,6 +35,8 @@ export interface ReviewComment {
   inReplyTo?: number | null;
   authorLogin?: string;
   authorIsBot?: boolean;
+  /** Author's association with the repo (e.g. OWNER, MEMBER, CONTRIBUTOR). */
+  authorRole?: string;
   /** Reaction rollup as delivered by the SCM (thumbs up / down). */
   reactions?: { up: number; down: number };
 }

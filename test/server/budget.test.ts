@@ -118,6 +118,20 @@ describe("BudgetService", () => {
     expect(String(executeRaw.mock.calls[0][0])).toContain("GREATEST");
   });
 
+  test("refundRateLimit clamps the window count at zero", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(1);
+    const service = new BudgetService({
+      $executeRaw: executeRaw
+    } as any);
+
+    await service.refundRateLimit("org_1", "openai", "gpt-4o");
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    const sql = String(executeRaw.mock.calls[0][0]);
+    expect(sql).toContain("rate_limit_windows");
+    expect(sql).toContain("GREATEST");
+  });
+
   test("budget checks reset to the first day of the next UTC month", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-31T12:00:00Z"));

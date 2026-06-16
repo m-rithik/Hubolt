@@ -71,6 +71,13 @@ body {
   min-height: 100%;
 }
 
+/* color-scheme: dark makes the canvas (overscroll / any area the body gradient
+   doesn't cover) paint near-black. Anchor it to the gradient's bottom color so
+   there's no black gap below the content. */
+html {
+  background-color: #020b31;
+}
+
 body {
   background:
     repeating-linear-gradient(90deg, rgba(116, 229, 255, 0.1) 0 18px, rgba(13, 74, 202, 0.16) 18px 38px, rgba(4, 26, 91, 0.54) 38px 74px),

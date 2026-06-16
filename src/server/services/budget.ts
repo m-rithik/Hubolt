@@ -372,6 +372,31 @@ export class BudgetService {
     `;
   }
 
+  /**
+   * Release a rate-limit slot that reserveUsage consumed when the request did
+   * not actually call the provider (deduplicated onto another job, or failed
+   * to enqueue). Without this, piggyback requests would burn a daily slot even
+   * though they triggered no provider work. Clamped at zero; a no-op when the
+   * window row is absent.
+   */
+  async refundRateLimit(
+    orgId: string,
+    provider: string,
+    model: string,
+    db: Pick<PrismaClient, "$executeRaw"> = this.db
+  ): Promise<void> {
+    const dayStart = startOfUtcDay(new Date());
+
+    await db.$executeRaw`
+      UPDATE "rate_limit_windows"
+      SET "requestCount" = GREATEST(0, "requestCount" - 1)
+      WHERE "orgId" = ${orgId}
+        AND "provider" = ${provider}
+        AND "model" = ${model}
+        AND "windowStart" = ${dayStart}
+    `;
+  }
+
   async resetMonthlyBudgets(orgId: string): Promise<void> {
     const now = new Date();
     const nextMonth = startOfNextUtcMonth(now);

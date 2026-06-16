@@ -44,6 +44,7 @@ interface RawComment {
   line?: number | null;
   in_reply_to_id?: number | null;
   user?: { login?: string; type?: string };
+  author_association?: string;
   reactions?: Record<string, unknown>;
 }
 
@@ -170,6 +171,7 @@ export class GitHubScmProvider implements ScmProvider {
       inReplyTo: comment.in_reply_to_id ?? null,
       authorLogin: comment.user?.login,
       authorIsBot: comment.user?.type === "Bot",
+      authorRole: comment.author_association,
       reactions: {
         up: readReactionCount(comment.reactions, "+1"),
         down: readReactionCount(comment.reactions, "-1")

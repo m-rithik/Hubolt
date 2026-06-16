@@ -105,7 +105,7 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         const since = new Date(Date.now() - days * 86400000);
         const orgScope = { orgId: request.orgId!, createdAt: { gte: since } };
 
-        const [reviewCount, severityRows, categoryRows, verdictRows, ruleRows] = await Promise.all([
+        const [reviewCount, severityRows, categoryGroups, categoryRows, verdictRows, ruleRows] = await Promise.all([
           context.db.review.count({
             where: orgScope
           }),
@@ -113,6 +113,13 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
             by: ["severity"],
             where: orgScope,
             _count: { _all: true }
+          }),
+          context.db.finding.groupBy({
+            by: ["category"],
+            where: orgScope,
+            _count: { _all: true },
+            orderBy: { _count: { category: "desc" } },
+            take: 10
           }),
           context.db.finding.groupBy({
             by: ["ruleId"],
@@ -158,6 +165,9 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
             bySeverity
           },
           feedback: { ...feedback, acceptanceRate },
+          topCategories: categoryGroups
+            .filter((row) => row.category)
+            .map((row) => ({ category: row.category as string, findings: row._count._all })),
           topRules: categoryRows.map((row) => {
             const fb = ruleFeedback.get(row.ruleId) ?? { accepted: 0, dismissed: 0 };
             const total = fb.accepted + fb.dismissed;

@@ -1,4 +1,4 @@
-import { api, storeKey } from "../api.js";
+import { api, storeKey, clearKey } from "../api.js";
 import { el, notice } from "../dom.js";
 
 /**
@@ -34,6 +34,10 @@ export function renderConnect(container, onConnected) {
       await api.org();
       onConnected();
     } catch (error) {
+      // The key has to be stored before verifying (the request helper reads it
+      // from storage), so a failed check must clear it again - otherwise an
+      // invalid key persists and bounces the next page load through the app.
+      clearKey();
       errorSlot.replaceChildren(
         notice("error", error.statusCode === 401 ? "Invalid API key" : error.message)
       );

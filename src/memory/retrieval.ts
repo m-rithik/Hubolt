@@ -1,5 +1,8 @@
 import type { MemoryCardData } from "./cards.js";
 
+/** Default token budget for cards retrieved into a review prompt. */
+export const RETRIEVAL_BUDGET_TOKENS = 1200;
+
 export interface RetrievalRequest {
   /** Repository the review runs in; repo-scoped cards win over org-scoped. */
   repoId?: string;

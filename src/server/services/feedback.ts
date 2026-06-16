@@ -1,6 +1,6 @@
 import { PrismaClient } from "../../generated/prisma/index.js";
 import type { FeedbackEventInput } from "../../memory/feedback-types.js";
-import { EMPTY_FEEDBACK_STATS, type FeedbackStats } from "../../memory/feedback-types.js";
+import { EMPTY_FEEDBACK_STATS, isMaintainerRole, type FeedbackStats } from "../../memory/feedback-types.js";
 import type { FeedbackLookup } from "../../memory/apply.js";
 
 export interface IngestFeedbackResult {
@@ -77,10 +77,12 @@ export class FeedbackService {
         fingerprint: event.fingerprint,
         ruleId: finding.ruleId,
         severity: finding.severity,
+        category: finding.category ?? null,
         verdict: event.verdict,
         source: event.source,
         externalId: event.externalId ?? null,
         actor: event.actor ?? null,
+        role: event.role ?? null,
         note: event.note ?? null
       });
     }
@@ -108,6 +110,7 @@ export class FeedbackService {
   ): Promise<FeedbackLookup> {
     const byFingerprint = new Map<string, FeedbackStats>();
     const byRule = new Map<string, FeedbackStats>();
+    const fingerprintDismissals = new Map<string, { byMaintainer: number; withKnownRole: number }>();
 
     if (fingerprints.length > 0) {
       const rows = await this.db.findingFeedback.groupBy({
@@ -122,6 +125,25 @@ export class FeedbackService {
       for (const row of rows) {
         accumulate(byFingerprint, row.fingerprint, row.verdict, row._count._all);
       }
+
+      // Role breakdown of dismissals, so suppression can weigh who dismissed.
+      const dismissalRows = await this.db.findingFeedback.groupBy({
+        by: ["fingerprint", "role"],
+        where: {
+          orgId,
+          fingerprint: { in: fingerprints },
+          repoId: scope.repoId,
+          verdict: "dismissed"
+        },
+        _count: { _all: true }
+      });
+      for (const row of dismissalRows) {
+        if (!row.role) continue;
+        const entry = fingerprintDismissals.get(row.fingerprint) ?? { byMaintainer: 0, withKnownRole: 0 };
+        entry.withKnownRole += row._count._all;
+        if (isMaintainerRole(row.role)) entry.byMaintainer += row._count._all;
+        fingerprintDismissals.set(row.fingerprint, entry);
+      }
     }
 
     if (ruleIds.length > 0) {
@@ -135,7 +157,7 @@ export class FeedbackService {
       }
     }
 
-    return { byFingerprint, byRule };
+    return { byFingerprint, byRule, fingerprintDismissals };
   }
 }
 

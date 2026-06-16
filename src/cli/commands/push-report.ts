@@ -101,6 +101,7 @@ async function pushReport(options: PushOptions): Promise<void> {
       ruleId: f.ruleId,
       message: f.message,
       severity: f.severity,
+      category: f.category,
       file: f.range.file,
       lineStart: f.range.startLine,
       lineEnd: f.range.endLine,

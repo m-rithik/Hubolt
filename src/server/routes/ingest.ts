@@ -35,6 +35,7 @@ const IngestPayloadSchema = z.object({
       ruleId: z.string(),
       message: z.string(),
       severity: z.enum(["info", "low", "medium", "high", "critical"]),
+      category: z.string().max(40).optional(),
       file: z.string(),
       fingerprint: z.string(),
       confidence: z.number().min(0).max(1).default(0.5)
@@ -206,6 +207,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
                 ruleId: f.ruleId,
                 message: f.message,
                 severity: f.severity,
+                category: f.category ?? null,
                 file: f.file,
                 lineStart: f.lineStart,
                 lineEnd: f.lineEnd,

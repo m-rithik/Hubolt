@@ -12,6 +12,8 @@ import { createJsonlEventLog, defaultEventLogPath } from "../../core/event-log.j
 import { InProcessReviewEventEmitter } from "../../core/events.js";
 import { getGitRoot, isGitRepository } from "../../core/git.js";
 import { runReviewPipeline, type ReviewResult } from "../../core/pipeline.js";
+import { retrieveCards, RETRIEVAL_BUDGET_TOKENS } from "../../memory/retrieval.js";
+import type { MemoryCardData } from "../../memory/cards.js";
 import { severityRank } from "../../core/rank.js";
 import { withLlmCache } from "../../core/llm-cache.js";
 import { buildReport, renderJsonReport, renderMarkdownReport } from "../../report/index.js";
@@ -22,6 +24,7 @@ import type { LLMProvider } from "../../types/providers.js";
 import { runSafelyAsync } from "../errors.js";
 import { startSpinner } from "../spinner.js";
 import { setColorEnabled, ui } from "../ui.js";
+import { resolveServerConnection, serverGet } from "../server-client.js";
 
 interface ReviewOptions {
   staged?: boolean;
@@ -180,6 +183,11 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
 
   const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode, analyzerCache);
 
+  // Pull org-scoped team memory cards from the server when one is configured.
+  // Local runs cannot identify the server-side repo, so only org-scoped cards
+  // (maintainer style cards, org-wide rule calibration) apply here.
+  const memory = useLlm ? await fetchTeamMemory(analyzerSignals.map((signal) => signal.ruleId)) : [];
+
   const baseLlm = useLlm ? getLLMProvider(providerName, { model: modelName }) : NO_LLM_PROVIDER;
   const llm = useLlm ? withLlmCache(baseLlm, llmCache, modelName) : baseLlm;
   const spinnerLabel = useLlm
@@ -188,7 +196,7 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
   const spinner = options.ci ? null : startSpinner(spinnerLabel);
   let result;
   try {
-    result = await runReviewPipeline({ context, config: settings.repo, llm, analyzerSignals });
+    result = await runReviewPipeline({ context, config: settings.repo, llm, analyzerSignals, memory });
   } catch (error) {
     spinner?.stop();
     await emitter.emit(
@@ -297,6 +305,33 @@ function parseFailOn(value: string | undefined): Severity | undefined {
  * Failures are isolated by runAnalyzers, so this never throws the review; it
  * prints a one-line summary and emits an analyzer.completed event.
  */
+/**
+ * Fetch team memory cards from a configured Hubolt server and select those
+ * that fit the prompt budget. Best effort: a missing server, missing
+ * credentials, or any request failure yields no cards and never fails the
+ * review. Repo is unknown locally, so only org-scoped cards are eligible.
+ */
+async function fetchTeamMemory(ruleIds: string[]): Promise<string[]> {
+  let connection;
+  try {
+    connection = resolveServerConnection({});
+  } catch {
+    return []; // no server configured; local review runs without memory
+  }
+
+  try {
+    const { cards } = await serverGet<{ cards: MemoryCardData[] }>(connection, "/memory/cards");
+    const selected = retrieveCards(cards, { ruleIds, budgetTokens: RETRIEVAL_BUDGET_TOKENS });
+    if (selected.length > 0) {
+      console.log(ui.muted(`Team memory: applied ${selected.length} card(s) from the server.`));
+    }
+    return selected.map((entry) => entry.card.body);
+  } catch (error) {
+    console.log(ui.muted(`Team memory unavailable: ${error instanceof Error ? error.message : "request failed"}`));
+    return [];
+  }
+}
+
 async function collectAnalyzerSignals(
   context: BuiltContext,
   settings: ResolvedSettings,

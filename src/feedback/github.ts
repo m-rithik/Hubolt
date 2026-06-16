@@ -50,7 +50,8 @@ export function collectPrFeedback(comments: ReviewComment[]): FeedbackEventInput
         verdict: "discussed",
         source: "github-reply",
         externalId: `gh:rc:${comment.inReplyTo}:reply:${comment.id}`,
-        actor: comment.authorLogin
+        actor: comment.authorLogin,
+        role: comment.authorRole
       });
     }
   }

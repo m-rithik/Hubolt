@@ -67,10 +67,16 @@ export class CredentialManager {
 
       const decrypted = this.decryptKey(cred.encryptedKey);
       if (options.touchLastUsed ?? true) {
-        await this.db.providerCredential.update({
-          where: { id: cred.id },
-          data: { lastUsedAt: new Date() }
-        });
+        // Best-effort: a failed "last used" write must not block a credential
+        // that was retrieved and decrypted successfully.
+        try {
+          await this.db.providerCredential.update({
+            where: { id: cred.id },
+            data: { lastUsedAt: new Date() }
+          });
+        } catch (touchError) {
+          console.error("Failed to update credential lastUsedAt:", touchError);
+        }
       }
 
       return decrypted;

@@ -113,6 +113,7 @@ async function readEventsFile(path: string): Promise<FeedbackEventInput[]> {
       source: typeof parsed.source === "string" ? parsed.source : "import",
       externalId: typeof parsed.externalId === "string" ? parsed.externalId : undefined,
       actor: typeof parsed.actor === "string" ? parsed.actor : undefined,
+      role: typeof parsed.role === "string" ? parsed.role : undefined,
       note: typeof parsed.note === "string" ? parsed.note : undefined
     });
   }

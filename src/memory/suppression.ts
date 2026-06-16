@@ -12,6 +12,9 @@ export type SuppressionDecision =
  * - critical findings and high+ security findings are never auto-suppressed
  * - an exact fingerprint the team dismissed before goes to summary at two
  *   dismissals and is suppressed at three, unless someone also accepted it
+ * - user role, when known: a wall of dismissals with no maintainer among
+ *   them is demoted, not fully silenced (outside contributors should not be
+ *   able to suppress a class on their own)
  * - a rule class with heavy dismissal and no acceptance demotes new
  *   instances to summary-only (never full suppression: same rule, new code)
  */
@@ -28,6 +31,13 @@ export function decideSuppression(
 
   const fp = feedback.byFingerprint;
   if (fp.accepted === 0 && fp.dismissed >= 3) {
+    const roles = feedback.fingerprintDismissals;
+    if (roles && roles.withKnownRole > 0 && roles.byMaintainer === 0) {
+      return {
+        action: "summary-only",
+        reason: `dismissed ${fp.dismissed} times, none by a maintainer`
+      };
+    }
     return {
       action: "suppress",
       reason: `dismissed ${fp.dismissed} times with no acceptance`

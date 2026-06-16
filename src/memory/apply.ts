@@ -8,6 +8,8 @@ export interface FeedbackLookup {
   byFingerprint: Map<string, FindingFeedbackContext["byFingerprint"]>;
   /** Aggregated feedback keyed by rule id. */
   byRule: Map<string, FindingFeedbackContext["byRule"]>;
+  /** Role breakdown of dismissals, keyed by fingerprint; empty when unknown. */
+  fingerprintDismissals?: Map<string, FindingFeedbackContext["fingerprintDismissals"]>;
 }
 
 export interface AppliedFeedback {
@@ -34,7 +36,8 @@ export function applyFeedback(findings: Finding[], lookup: FeedbackLookup): Appl
   for (const finding of findings) {
     const context: FindingFeedbackContext = {
       byFingerprint: lookup.byFingerprint.get(finding.fingerprint) ?? EMPTY_FEEDBACK_STATS,
-      byRule: lookup.byRule.get(finding.ruleId) ?? EMPTY_FEEDBACK_STATS
+      byRule: lookup.byRule.get(finding.ruleId) ?? EMPTY_FEEDBACK_STATS,
+      fingerprintDismissals: lookup.fingerprintDismissals?.get(finding.fingerprint)
     };
 
     const decision = decideSuppression(finding, context);

@@ -49,6 +49,29 @@ describe("decideSuppression", () => {
     expect(decideSuppression(finding(), context).action).toBe("keep");
   });
 
+  test("contributor-only dismissals demote instead of fully suppressing", () => {
+    const context = {
+      byFingerprint: stats(0, 4),
+      byRule: none,
+      fingerprintDismissals: { byMaintainer: 0, withKnownRole: 4 }
+    };
+    expect(decideSuppression(finding(), context).action).toBe("summary-only");
+  });
+
+  test("a maintainer dismissal allows full suppression", () => {
+    const context = {
+      byFingerprint: stats(0, 4),
+      byRule: none,
+      fingerprintDismissals: { byMaintainer: 1, withKnownRole: 4 }
+    };
+    expect(decideSuppression(finding(), context).action).toBe("suppress");
+  });
+
+  test("unknown roles fall back to count-based suppression", () => {
+    const context = { byFingerprint: stats(0, 3), byRule: none };
+    expect(decideSuppression(finding(), context).action).toBe("suppress");
+  });
+
   test("a heavily dismissed rule class demotes to summary, never suppresses", () => {
     const context = { byFingerprint: none, byRule: stats(0, 6) };
     expect(decideSuppression(finding(), context)).toEqual({

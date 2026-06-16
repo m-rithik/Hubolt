@@ -10,6 +10,7 @@ const FeedbackEventSchema = z.object({
   source: z.string().min(1).max(60),
   externalId: z.string().min(1).max(200).optional(),
   actor: z.string().max(120).optional(),
+  role: z.string().max(40).optional(),
   note: z.string().max(2000).optional()
 });
 

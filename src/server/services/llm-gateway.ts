@@ -129,7 +129,11 @@ export class LLMGateway {
       const model = request.overrideModel || routing.model;
       this.validateRoutedModel(provider, model);
 
-      const credential = await this.credentialManager.getCredential(request.orgId, provider);
+      // Existence/availability check only; the worker touches lastUsedAt when
+      // it actually uses the credential, so don't touch it twice per request.
+      const credential = await this.credentialManager.getCredential(request.orgId, provider, {
+        touchLastUsed: false
+      });
       if (!credential) {
         throw new GatewayError(
           `No credentials configured for provider: ${provider}`,
@@ -185,6 +189,7 @@ export class LLMGateway {
       const reusableJobIdAfterReservation = await this.requestQueue.getReusableJobId(promptHash);
       if (reusableJobIdAfterReservation) {
         await this.budgetService.refundUsage(request.orgId, provider, estimatedCostUsd);
+        await this.refundRateLimitSlot(request.orgId, provider, model);
         result = await this.requestQueue.getResult(reusableJobIdAfterReservation, GATEWAY_CONFIG.JOB_TIMEOUT_MS);
         return await this.buildQueueResponse(result, request.orgId, provider, model, startTime);
       }
@@ -200,6 +205,7 @@ export class LLMGateway {
           const prepared = await this.preparePersistentBudgetReservation(promptHash, queuedRequest.budgetReservation);
           if (prepared.status === "reusable") {
             await this.budgetService.refundUsage(request.orgId, provider, estimatedCostUsd);
+            await this.refundRateLimitSlot(request.orgId, provider, model);
             budgetRefunded = true;
             result = await this.requestQueue.getResult(prepared.jobId, queuedRequest.timeout);
             return await this.buildQueueResponse(result, request.orgId, provider, model, startTime);
@@ -221,6 +227,8 @@ export class LLMGateway {
                 queuedRequest.budgetReservation.estimatedCostUsd
               );
             }
+            // Enqueue failed, so no provider call happens for this reservation.
+            await this.refundRateLimitSlot(request.orgId, provider, model);
           }
           throw enqueueError;
         }
@@ -234,6 +242,9 @@ export class LLMGateway {
           } else {
             await this.budgetService.refundUsage(request.orgId, provider, estimatedCostUsd);
           }
+          // Deduplicated onto an existing job: this request triggers no
+          // provider call, so release the rate-limit slot it reserved.
+          await this.refundRateLimitSlot(request.orgId, provider, model);
           budgetRefunded = true;
         }
 
@@ -585,6 +596,18 @@ export class LLMGateway {
 
   private async sleep(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Pair with budget refunds on paths where this request reserved a slot but
+  // then attached to another job (dedup/piggyback) or failed to enqueue, so a
+  // request that did no provider work does not keep consuming a rate-limit
+  // slot. Best-effort: a failed refund must not change the request outcome.
+  private async refundRateLimitSlot(orgId: string, provider: string, model: string): Promise<void> {
+    try {
+      await this.budgetService.refundRateLimit(orgId, provider, model);
+    } catch (error) {
+      console.error("Failed to refund rate-limit slot:", error);
+    }
   }
 
   private async settleCompletedJob(jobId: string, rawResult: unknown): Promise<void> {

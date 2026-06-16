@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "promptVersion": "1"
   },
-  "generatedAt": "2026-06-15T08:06:31.324Z",
+  "generatedAt": "2026-06-16T05:28:27.449Z",
   "scope": "staged changes",
   "mode": "balanced",
   "provider": "google",
@@ -16,8 +16,8 @@
     "bySeverity": {
       "info": 0,
       "low": 0,
-      "medium": 1,
-      "high": 0,
+      "medium": 0,
+      "high": 1,
       "critical": 0
     }
   },
@@ -32,28 +32,27 @@
   },
   "findings": [
     {
-      "fingerprint": "fp_cfe8c1ccb1b4f643",
-      "ruleId": "performance.prisma-interactive-transaction-promise-all",
-      "title": "Concurrency risk and potential deadlock from Promise.all in interactive transaction",
-      "message": "Executing database updates concurrently using Promise.all inside a Prisma interactive transaction ($transaction) is a known performance anti-pattern. Because interactive transactions serialize operations on a single database connection, triggering concurrent updates via Promise.all can lead to connection pool starvation, deadlocks, or transaction timeouts.",
-      "category": "performance",
-      "severity": "medium",
+      "fingerprint": "fp_7c214b3d43f09803",
+      "ruleId": "missing-migration-column",
+      "title": "Missing 'category' Column for 'finding_feedback' Table in SQL Migration",
+      "message": "The database migration script adds the 'category' column to the 'findings' table, but fails to add it to the 'finding_feedback' table. However, the Prisma schema has been updated to include 'category String?' on the 'FindingFeedback' model, and 'FeedbackService.ingest' attempts to write to this property. This mismatch will cause database insertion errors and server crashes when ingesting feedback.",
+      "category": "quality",
+      "severity": "high",
       "confidenceLabel": "high",
       "source": "llm",
       "range": {
-        "file": "src/server/services/memory.ts",
-        "startLine": 93,
-        "endLine": 112,
+        "file": "prisma/migrations/0011_finding_category_feedback_role/migration.sql",
+        "startLine": 1,
+        "endLine": 6,
         "diffSide": "right"
       },
       "evidence": [
-        "await Promise.all(",
-        "cardsToUpdate.map((card) =>",
-        "tx.memoryCard.update({"
+        "ALTER TABLE \"findings\" ADD COLUMN \"category\" TEXT;",
+        "ALTER TABLE \"finding_feedback\" ADD COLUMN \"role\" TEXT;"
       ],
-      "impact": "When rebuilding rule-calibration cards with a large volume of rule feedback, the memory rebuild process can suffer from transactional deadlocks, query timeouts, or database connection exhaustion.",
-      "suggestion": "Execute the update operations sequentially using a 'for...of' loop inside the transaction instead of using Promise.all.",
-      "verification": "Rebuild the memory cards on a database populated with a large volume of distinct rule feedback. Verify that executing the updates sequentially completes reliably without transaction deadlocks or database connection starvation.",
+      "impact": "Any attempt to ingest finding feedback on the server will crash with a PostgreSQL database error ('column \"category\" of relation \"finding_feedback\" does not exist'), completely breaking the feedback ingestion feature in production.",
+      "suggestion": "Add 'ALTER TABLE \"finding_feedback\" ADD COLUMN \"category\" TEXT;' to the migration script.",
+      "verification": "Run the database migrations on a PostgreSQL instance, then execute a review comment feedback ingestion flow. Observe that the transaction fails with a PostgreSQL error due to the missing column.",
       "relatedSignals": [],
       "tags": []
     }
@@ -97,8 +96,8 @@
     "rules": []
   },
   "modelUsage": {
-    "inputTokens": 73061,
-    "outputTokens": 22071,
+    "inputTokens": 57563,
+    "outputTokens": 7195,
     "estimatedCostUsd": 0
   }
 }

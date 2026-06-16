@@ -351,6 +351,13 @@ export class RequestQueue {
 
   private async addJob(request: QueuedRequest): Promise<EnqueueResult> {
     try {
+      // BullMQ's add with an explicit jobId is idempotent: when the id already
+      // exists it returns the existing job WITHOUT throwing. So "add resolved"
+      // does not mean we created it. A freshly created job carries a timestamp
+      // at or after this moment; a pre-existing one keeps its earlier creation
+      // time. Use that to report `created` honestly. (The gatewayBudgetReservation
+      // unique constraint remains the authoritative concurrency guard.)
+      const addStartedAt = Date.now();
       const job = await this.queue.add(
         "process-request",
         request,
@@ -370,7 +377,8 @@ export class RequestQueue {
           }
         }
       );
-      return { jobId: job.id!, created: true };
+      const created = typeof job.timestamp === "number" ? job.timestamp >= addStartedAt : true;
+      return { jobId: job.id!, created };
     } catch (error) {
       const existingJob = await this.queue.getJob(request.promptHash);
       if (existingJob) {
@@ -401,6 +409,9 @@ export class RequestQueue {
     return createHash("sha256").update(prompt).digest("hex");
   }
 
+  // Tolerates both single- and double-serialized cache entries: callers may
+  // pass an already-serialized string, and older entries were stored
+  // double-encoded. Parse once, and if that yields a string, try once more.
   private parseCachedResult(cached: string): unknown {
     const parsed = JSON.parse(cached);
 

@@ -46,6 +46,7 @@ model FindingFeedback {
   externalId String?
 
   actor String?
+  role  String?
   note  String?
 
   createdAt DateTime @default(now())
@@ -208,6 +209,7 @@ model Finding {
   ruleId    String
   message   String
   severity  String
+  category  String?
   file      String
   lineStart Int
   lineEnd   Int
