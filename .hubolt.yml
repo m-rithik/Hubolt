@@ -1,4 +1,4 @@
-mode: balanced
+mode: security
 severityThreshold: medium
 failOnSeverity: critical
 commentBudget: 8
@@ -15,3 +15,10 @@ privacy:
   allowExternalModels: true
 
 rules: []
+integrations:
+  slack:
+    enabled: true
+    minSeverity: info
+  teams:
+    enabled: true
+    minSeverity: info

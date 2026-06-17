@@ -14,6 +14,9 @@ import { collectPrFeedback } from "../feedback/github.js";
 import { applyFeedback } from "../memory/apply.js";
 import { FeedbackService } from "../server/services/feedback.js";
 import { MemoryService } from "../server/services/memory.js";
+import { buildIntegrations, dispatchIntegrations } from "../integrations/registry.js";
+import { buildIntegrationEvent } from "../integrations/event.js";
+import type { ReviewReport } from "../types/reports.js";
 
 const MEMORY_RULE_LOOKBACK_LIMIT = 50;
 
@@ -175,6 +178,11 @@ export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps
     update: { headSha: job.headSha }
   });
 
+  // Notify configured integrations after the review is persisted and posted.
+  // Best-effort: the LLM has already been paid for, so an integration failure
+  // must never fail the job or trigger a re-bill on retry.
+  await dispatchReviewIntegrations(deps.db, job, config, report);
+
   return {
     status: "completed",
     reviewId,
@@ -186,6 +194,59 @@ export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps
     memoryCardsUsed: memoryCards.length,
     ...(postError !== undefined ? { postError } : {})
   };
+}
+
+/**
+ * Deliver a completed hosted review to the repo's configured integrations.
+ * Best-effort end to end: a setup or delivery failure is logged, never thrown.
+ * An audit event records what was delivered (adapters and status only, never
+ * the payload or any secret).
+ *
+ * ponytail: the webhook secret is read from the server environment, so this is
+ * correct for a single-tenant/self-hosted server. Per-org integration secrets
+ * are the multi-tenant/RBAC slice; until then a multi-tenant operator should
+ * leave the global webhook env unset.
+ */
+async function dispatchReviewIntegrations(
+  db: PrismaClient,
+  job: ReviewJob,
+  config: RepoConfig,
+  report: ReviewReport
+): Promise<void> {
+  let adapters;
+  try {
+    adapters = buildIntegrations(config);
+  } catch (error) {
+    console.warn(`Integration setup failed for PR #${job.prNumber}:`, error instanceof Error ? error.message : error);
+    return;
+  }
+  if (adapters.length === 0) {
+    return;
+  }
+
+  try {
+    const results = await dispatchIntegrations(buildIntegrationEvent(report), adapters);
+
+    for (const result of results) {
+      if (!result.ok) {
+        console.warn(`Integration ${result.adapter} failed for PR #${job.prNumber}: ${result.error ?? "unknown error"}`);
+      }
+    }
+
+    await db.auditEvent.create({
+      data: {
+        orgId: job.orgId,
+        action: "integration.dispatched",
+        resource: "integration",
+        details: JSON.stringify({
+          prNumber: job.prNumber,
+          deliveries: results.map((result) => ({ adapter: result.adapter, ok: result.ok, status: result.status }))
+        })
+      }
+    });
+  } catch (error) {
+    console.warn(`Integration dispatch failed for PR #${job.prNumber}:`, error instanceof Error ? error.message : error);
+  }
 }
 
 async function recordPostFailure(

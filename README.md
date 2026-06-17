@@ -141,6 +141,7 @@ jobs:
 | `hubolt review --staged` | Review staged changes only | `hubolt review --staged` |
 | `hubolt review [file]` | Review a specific file | `hubolt review src/app.ts` |
 | `hubolt review --base HEAD~1 --head HEAD` | Review commit range | `hubolt review --base main --head feature` |
+| `hubolt review mode` | Select and save review mode | `hubolt review mode` |
 | `hubolt security` | Security-focused review (fails on high) | `hubolt security` |
 | `hubolt security --fail-on critical` | Security review with custom severity | `hubolt security --fail-on critical` |
 | `hubolt analyze` | Analyzers only, no LLM | `hubolt analyze --no-cache` |
@@ -165,6 +166,8 @@ jobs:
 |---------|---------|---------|
 | `hubolt setup` | Configure LLM provider | `hubolt setup` |
 | `hubolt setup --print` | Print sample config | `hubolt setup --print > .hubolt.yml` |
+| `hubolt setup --use-existing-keys` | Keep existing provider keys during setup | `hubolt setup --use-existing-keys` |
+| `hubolt setup --rewrite-keys` | Replace existing provider keys during setup | `hubolt setup --rewrite-keys` |
 | `hubolt config validate` | Validate config & credentials | `hubolt config validate` |
 | `hubolt config show` | Display current config | `hubolt config show` |
 

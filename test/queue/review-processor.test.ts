@@ -445,4 +445,59 @@ describe("processReviewJob", () => {
     expect(outcome).toMatchObject({ status: "completed", findingCount: 0 });
     expect(tx.finding.createMany).not.toHaveBeenCalled();
   });
+
+  test("dispatches to integrations enabled in repo config and audits delivery", async () => {
+    const scm = makeScm({
+      getFileContent: vi.fn(async (path: string) => {
+        if (path === ".hubolt.yml") {
+          return "integrations:\n  slack:\n    enabled: true\n    minSeverity: info\n";
+        }
+        if (path === "src/a.ts") return FILE_CONTENT;
+        return null;
+      })
+    });
+    const { db } = makeDb(null);
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("HUBOLT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/test");
+
+    try {
+      const outcome = await processReviewJob(JOB, {
+        db,
+        createScm: () => scm,
+        createLlm: () => makeLlm()
+      });
+
+      expect(outcome.status).toBe("completed");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://hooks.slack.com/services/test",
+        expect.objectContaining({ method: "POST" })
+      );
+      expect(db.auditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ action: "integration.dispatched" })
+        })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  test("does not dispatch when no integration is enabled", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => makeLlm() });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(db.auditEvent.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ action: "integration.dispatched" }) })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

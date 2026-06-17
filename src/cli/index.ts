@@ -13,6 +13,8 @@ import { registerGitHubCommand } from "./commands/github.js";
 import { registerHistoryCommand } from "./commands/history.js";
 import { registerLogsCommand } from "./commands/logs.js";
 import { registerMemoryCommand } from "./commands/memory.js";
+import { registerIntegrationsCommand } from "./commands/integrations.js";
+import { registerIssuesCommand } from "./commands/issues.js";
 import { registerProvidersCommand } from "./commands/providers.js";
 import { registerPushReportCommand } from "./commands/push-report.js";
 import { registerReportCommand } from "./commands/report.js";
@@ -50,6 +52,8 @@ registerGatewayCommand(program);
 registerAuditCommand(program);
 registerFeedbackCommand(program);
 registerMemoryCommand(program);
+registerIntegrationsCommand(program);
+registerIssuesCommand(program);
 configureCliHelp(program);
 
 program.action(() => {

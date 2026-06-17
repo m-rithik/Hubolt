@@ -32,15 +32,17 @@ hubolt setup
 
 # Interactive prompt guides you through:
 # 1. Choose provider: Anthropic Claude, OpenAI, or Google
-# 2. Enter API key
+# 2. Enter API key, or keep an existing key when one is already configured
 # 3. Save to .env
 ```
 
 **Options:**
 - `--print` - Print a starter `.hubolt.yml` config instead of saving
+- `--use-existing-keys` - Reuse existing provider API keys without prompting when present
+- `--rewrite-keys` - Prompt for new provider API keys even when existing keys are present
 
 **Output:**
-- Creates/updates `.env` with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`
+- Creates/updates `.env` with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`
 - Can optionally create `.hubolt.yml` with review settings
 
 ---
@@ -71,6 +73,9 @@ hubolt review --provider openai --model gpt-4
 # Enable security mode
 hubolt review --security
 
+# Select and save review mode
+hubolt review mode
+
 # Output formats
 hubolt review --json report.json --md report.md
 
@@ -93,6 +98,26 @@ hubolt review --ci --fail-on high
 - `--fail-on <severity>` - Exit non-zero if findings reach this severity: `info`, `low`, `medium`, `high`, `critical`
 - `--json <path>` - Write JSON report to file
 - `--md <path>` - Write Markdown report to file
+- `--config <path>` - Path to `.hubolt.yml` config file
+
+### `hubolt review mode`
+
+Select and save the repository review mode in `.hubolt.yml`.
+
+```bash
+hubolt review mode
+hubolt review mode --set strict
+hubolt review mode --config .hubolt.prod.yml
+```
+
+**Modes:**
+- `quiet` - Lowest-noise review mode
+- `balanced` - Default review mode
+- `strict` - More critical review mode
+- `security` - Security findings only
+
+**Options:**
+- `--set <mode>` - Set mode without prompting
 - `--config <path>` - Path to `.hubolt.yml` config file
 
 **Examples:**

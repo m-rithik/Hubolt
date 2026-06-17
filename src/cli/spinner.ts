@@ -18,14 +18,35 @@ export function startSpinner(text: string): Spinner {
 
   let frame = 0;
   process.stdout.write("\x1B[?25l"); // hide cursor
+
+  // Restore the cursor if the process is interrupted mid-spin (Ctrl+C) or
+  // exits, not just on a normal stop(); otherwise the terminal is left with an
+  // invisible cursor until reset.
+  const showCursor = (): void => {
+    process.stdout.write("\x1B[?25h");
+  };
+  const onExit = (): void => showCursor();
+  const onSigint = (): void => {
+    showCursor();
+    process.exit(130);
+  };
+  process.once("exit", onExit);
+  process.once("SIGINT", onSigint);
+
+  const render = (): void => {
+    process.stdout.write(`\r${ui.info(FRAMES[frame])} ${ui.muted(text)}`);
+  };
+  render(); // paint frame 0 now so the glyph is visible even before the first tick
   const timer = setInterval(() => {
     frame = (frame + 1) % FRAMES.length;
-    process.stdout.write(`\r${ui.info(FRAMES[frame])} ${ui.muted(text)}`);
+    render();
   }, 80);
 
   return {
     stop(finalLine?: string): void {
       clearInterval(timer);
+      process.removeListener("exit", onExit);
+      process.removeListener("SIGINT", onSigint);
       process.stdout.write("\r\x1B[K\x1B[?25h"); // clear line, show cursor
       if (finalLine) {
         console.log(finalLine);

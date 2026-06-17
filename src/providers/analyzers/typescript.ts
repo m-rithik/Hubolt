@@ -1,12 +1,21 @@
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { Worker } from "node:worker_threads";
 import type * as TS from "typescript";
-import type { AnalyzerSignal, Severity } from "../../types/finding.js";
+import type { AnalyzerSignal } from "../../types/finding.js";
 import type { AnalyzerContext, AnalyzerProvider } from "../../types/providers.js";
+import { runTypeScriptDiagnostics, toRepoAbsolutePath } from "./typescript-core.js";
+
+export { toRepoAbsolutePath };
 
 /**
- * TypeScript compiler-API analyzer. Builds a program from the repository
- * tsconfig and reports pre-emit diagnostics that fall on changed files. Degrades
- * to unavailable (not an error) when typescript or a tsconfig is missing.
+ * TypeScript compiler-API analyzer. Reports diagnostics on changed files.
+ * Degrades to unavailable (not an error) when typescript or a tsconfig is
+ * missing.
+ *
+ * The analysis (createProgram + type-check) is synchronous and CPU-heavy, so
+ * it runs in a worker thread to keep the main thread - and its progress
+ * spinner - responsive. If the worker cannot start (for example when running
+ * from .ts sources without a built worker file), it falls back to running the
+ * same analysis inline; results are identical, only the spinner pauses.
  */
 export function makeTypeScriptAnalyzer(): AnalyzerProvider {
   return {
@@ -23,29 +32,65 @@ export function makeTypeScriptAnalyzer(): AnalyzerProvider {
       if (!ts) {
         return [];
       }
-
-      const configPath = ts.findConfigFile(ctx.repoRoot, ts.sys.fileExists, "tsconfig.json");
-      if (!configPath) {
+      if (!ts.findConfigFile(ctx.repoRoot, ts.sys.fileExists, "tsconfig.json")) {
         return [];
       }
 
-      const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
-      const parsed = ts.parseJsonConfigFileContent(configFile.config ?? {}, ts.sys, dirname(configPath));
-      const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
-
-      const changed = new Set(ctx.files.map((file) => toRepoAbsolutePath(ctx.repoRoot, file.path)));
-      const signals: AnalyzerSignal[] = [];
-
-      for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
-        if (!diagnostic.file || !changed.has(toRepoAbsolutePath(ctx.repoRoot, diagnostic.file.fileName))) {
-          continue;
-        }
-        signals.push(toSignal(ts, ctx.repoRoot, diagnostic));
+      const changedPaths = ctx.files.map((file) => file.path);
+      try {
+        return await analyzeInWorker(ctx.repoRoot, changedPaths);
+      } catch {
+        // No worker available: run inline. Correct, but blocks the main thread.
+        return runTypeScriptDiagnostics(ts, ctx.repoRoot, changedPaths);
       }
-
-      return signals;
     }
   };
+}
+
+interface WorkerResult {
+  signals?: AnalyzerSignal[];
+  error?: string;
+}
+
+function analyzeInWorker(repoRoot: string, changedPaths: string[]): Promise<AnalyzerSignal[]> {
+  return new Promise<AnalyzerSignal[]>((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./typescript-worker.js", import.meta.url), {
+        workerData: { repoRoot, changedPaths }
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      void worker.terminate();
+      action();
+    };
+
+    worker.once("message", (message: WorkerResult) => {
+      if (message.error) {
+        finish(() => reject(new Error(message.error)));
+      } else {
+        finish(() => resolve(message.signals ?? []));
+      }
+    });
+    worker.once("error", (error) => finish(() => reject(error)));
+    worker.once("exit", (code) => {
+      // Settle on any unsettled exit, including a clean (code 0) exit that
+      // never posted a result. Otherwise the await would hang forever; the
+      // caller falls back to inline analysis instead.
+      if (!settled) {
+        finish(() => reject(new Error(`typescript worker exited without a result (code ${code})`)));
+      }
+    });
+  });
 }
 
 let typeScriptModule: typeof TS | null | undefined;
@@ -61,48 +106,4 @@ async function loadTypeScript(): Promise<typeof TS | null> {
     typeScriptModule = null;
   }
   return typeScriptModule;
-}
-
-function toSignal(ts: typeof TS, repoRoot: string, diagnostic: TS.Diagnostic): AnalyzerSignal {
-  const file = diagnostic.file as TS.SourceFile;
-  const absolutePath = toRepoAbsolutePath(repoRoot, file.fileName);
-  const path = relative(repoRoot, absolutePath) || file.fileName;
-  const start = diagnostic.start ?? 0;
-  const startPos = file.getLineAndCharacterOfPosition(start);
-  const endPos = file.getLineAndCharacterOfPosition(start + (diagnostic.length ?? 0));
-  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-
-  return {
-    id: `typescript:TS${diagnostic.code}:${path}:${startPos.line + 1}`,
-    analyzer: "typescript",
-    ruleId: `typescript.TS${diagnostic.code}`,
-    range: {
-      file: path,
-      startLine: startPos.line + 1,
-      endLine: Math.max(startPos.line + 1, endPos.line + 1),
-      startColumn: startPos.character + 1,
-      endColumn: endPos.character + 1,
-      diffSide: "right"
-    },
-    severity: severityFor(ts, diagnostic.category),
-    message,
-    evidence: [`tsc TS${diagnostic.code}`]
-  };
-}
-
-export function toRepoAbsolutePath(repoRoot: string, fileName: string): string {
-  return isAbsolute(fileName) ? resolve(fileName) : resolve(repoRoot, fileName);
-}
-
-function severityFor(ts: typeof TS, category: TS.DiagnosticCategory): Severity {
-  switch (category) {
-    case ts.DiagnosticCategory.Error:
-      return "high";
-    case ts.DiagnosticCategory.Warning:
-      return "medium";
-    case ts.DiagnosticCategory.Suggestion:
-      return "low";
-    default:
-      return "info";
-  }
 }

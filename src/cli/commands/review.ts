@@ -1,7 +1,10 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { cancel, intro, isCancel, outro, select } from "@clack/prompts";
 import type { Command } from "commander";
-import type { RepoConfig } from "../../config/schema.js";
+import { isMap, parseDocument } from "yaml";
+import { DEFAULT_CONFIG_FILE } from "../../config/defaults.js";
+import { RepoConfigSchema, ReviewModeSchema, type RepoConfig } from "../../config/schema.js";
 import { resolveSettings, type ResolvedSettings } from "../../config/resolve.js";
 import { buildAnalyzerContext, runAnalyzers, selectAnalyzers } from "../../core/analyze.js";
 import type { SkippedAnalyzer } from "../../core/analyze.js";
@@ -17,11 +20,15 @@ import type { MemoryCardData } from "../../memory/cards.js";
 import { severityRank } from "../../core/rank.js";
 import { withLlmCache } from "../../core/llm-cache.js";
 import { buildReport, renderJsonReport, renderMarkdownReport } from "../../report/index.js";
+import type { ReviewReport } from "../../types/reports.js";
+import { buildIntegrations, dispatchIntegrations } from "../../integrations/registry.js";
+import { buildIntegrationEvent } from "../../integrations/event.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import { createReviewEvent } from "../../types/events.js";
 import { CONTEXT_ADJACENT_TAG, SeveritySchema, type AnalyzerSignal, type Finding, type Severity } from "../../types/finding.js";
 import type { LLMProvider } from "../../types/providers.js";
 import { runSafelyAsync } from "../errors.js";
+import { renderStarterConfig } from "../starter-config.js";
 import { startSpinner } from "../spinner.js";
 import { setColorEnabled, ui } from "../ui.js";
 import { resolveServerConnection, serverGet } from "../server-client.js";
@@ -46,6 +53,20 @@ interface ReviewOptions {
   filepath?: string;
 }
 
+interface ReviewModeOptions {
+  config?: string;
+  set?: string;
+}
+
+type ReviewMode = RepoConfig["mode"];
+
+const REVIEW_MODE_OPTIONS: Array<{ value: ReviewMode; label: string; hint: string }> = [
+  { value: "quiet", label: "quiet", hint: "Lowest noise; best for pre-commit checks." },
+  { value: "balanced", label: "balanced", hint: "Default review signal and comment budget." },
+  { value: "strict", label: "strict", hint: "More critical pass for careful review." },
+  { value: "security", label: "security", hint: "Security findings only." }
+];
+
 /** Analyzer-only provider used by --no-llm: contributes no LLM findings. */
 const NO_LLM_PROVIDER: LLMProvider = {
   name: "none",
@@ -60,7 +81,7 @@ interface RunOptions {
 }
 
 export function registerReviewCommand(program: Command): void {
-  program
+  const review = program
     .command("review [filepath]")
     .description("Review the current local changes or a specific file with the configured LLM provider.")
     .option("--staged", "review staged changes instead of the working tree")
@@ -78,6 +99,16 @@ export function registerReviewCommand(program: Command): void {
     .option("-c, --config <path>", "path to a Hubolt config file")
     .action((filepath: string | undefined, options: ReviewOptions) => {
       return runSafelyAsync(() => runReview({ ...options, filepath }));
+    });
+
+  review
+    .command("mode")
+    .description("Select and save the repository review mode.")
+    .option("--set <mode>", "set mode without prompting (quiet|balanced|strict|security)")
+    .option("-c, --config <path>", "path to a Hubolt config file")
+    .action((options: ReviewModeOptions, command: Command) => {
+      const parentOptions = command.parent?.opts<ReviewOptions>() ?? {};
+      return runSafelyAsync(() => runReviewMode({ ...options, config: options.config ?? parentOptions.config }));
     });
 }
 
@@ -181,7 +212,7 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     return;
   }
 
-  const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode, analyzerCache);
+  const analyzerSignals = await collectAnalyzerSignals(context, settings, emitter, repo, securityMode, analyzerCache, !options.ci);
 
   // Pull org-scoped team memory cards from the server when one is configured.
   // Local runs cannot identify the server-side repo, so only org-scoped cards
@@ -193,6 +224,9 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
   const spinnerLabel = useLlm
     ? `Reviewing ${context.reviewable.length} file(s) with ${providerName}...`
     : `Analyzing ${context.reviewable.length} file(s) (no model call)...`;
+  if (useLlm) {
+    console.log(ui.muted(`LLM: calling ${providerName} (${modelName})`));
+  }
   const spinner = options.ci ? null : startSpinner(spinnerLabel);
   let result;
   try {
@@ -207,7 +241,7 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
         redactionState: "metadataOnly"
       })
     );
-    throw error;
+    throw contextualizeReviewError(error, useLlm);
   }
   spinner?.stop();
 
@@ -238,7 +272,7 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
 
   printResult(result);
 
-  writeReports(options, {
+  const report = buildReport({
     scope: context.scope,
     config: settings.repo,
     provider: useLlm ? providerName : "none",
@@ -246,22 +280,95 @@ async function runReview(options: ReviewOptions, runOptions: RunOptions = {}): P
     result,
     analyzerSignals
   });
+  writeReports(options, report);
+  await dispatchReviewIntegrations(settings.repo, report);
 
   if (runOptions.failOnExit || options.ci) {
     applyFailOnGate(result, failOn, securityMode ? "Security gate" : "CI gate");
   }
 }
 
+async function runReviewMode(options: ReviewModeOptions): Promise<void> {
+  const configPath = resolve(process.cwd(), options.config ?? DEFAULT_CONFIG_FILE);
+  const current = readCurrentMode(configPath);
+
+  const nextMode = options.set ? parseReviewMode(options.set) : await promptReviewMode(current);
+  if (!nextMode) {
+    return;
+  }
+
+  writeReviewModeConfig(configPath, nextMode);
+
+  if (options.set) {
+    console.log(ui.success(`Review mode set to ${nextMode} in ${configPath}`));
+  } else {
+    outro(`Review mode set to ${nextMode} in ${configPath}`);
+  }
+}
+
+function readCurrentMode(configPath: string): ReviewMode {
+  const parsed = existsSync(configPath)
+    ? RepoConfigSchema.parse(parseDocument(readFileSync(configPath, "utf8")).toJS())
+    : RepoConfigSchema.parse({});
+  return parsed.mode;
+}
+
+async function promptReviewMode(current: ReviewMode): Promise<ReviewMode | null> {
+  intro("Hubolt review mode");
+
+  const selectedMode = await select({
+    message: "Review mode",
+    options: REVIEW_MODE_OPTIONS,
+    initialValue: current
+  });
+  if (isCancel(selectedMode)) {
+    cancel("Review mode unchanged.");
+    return null;
+  }
+
+  return selectedMode;
+}
+
+function parseReviewMode(value: string): ReviewMode {
+  const parsed = ReviewModeSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`Invalid review mode: ${value}. Use quiet, balanced, strict, or security.`);
+  }
+  return parsed.data;
+}
+
+function contextualizeReviewError(error: unknown, useLlm: boolean): Error {
+  if (!useLlm) {
+    return error instanceof Error ? error : new Error("Analyzer-only review failed.");
+  }
+
+  const message = error instanceof Error ? error.message : "unknown provider error";
+  return new Error(`LLM review failed after analyzer phase completed: ${message}`);
+}
+
+export function writeReviewModeConfig(configPath: string, mode: string): void {
+  const nextMode = parseReviewMode(mode);
+  const raw = existsSync(configPath) ? readFileSync(configPath, "utf8") : renderStarterConfig();
+  const document = parseDocument(raw);
+
+  if (document.errors.length > 0) {
+    throw new Error(`Cannot update ${configPath}: invalid YAML.`);
+  }
+  if (document.contents !== null && !isMap(document.contents)) {
+    throw new Error(`Cannot update ${configPath}: expected a YAML mapping at the top level.`);
+  }
+
+  document.set("mode", nextMode);
+  RepoConfigSchema.parse(document.toJS());
+  writeFileSync(configPath, String(document));
+}
+
 /** Write JSON and/or Markdown reports when --json/--md were provided. */
-function writeReports(
-  options: ReviewOptions,
-  params: Parameters<typeof buildReport>[0]
-): void {
+function writeReports(options: ReviewOptions, report: ReviewReport): void {
   if (!options.json && !options.md) {
     return;
   }
 
-  const report = buildReport(params);
   if (options.json) {
     writeFileSync(options.json, renderJsonReport(report));
     console.log(ui.muted(`Wrote JSON report to ${options.json}`));
@@ -269,6 +376,31 @@ function writeReports(
   if (options.md) {
     writeFileSync(options.md, renderMarkdownReport(report));
     console.log(ui.muted(`Wrote Markdown report to ${options.md}`));
+  }
+}
+
+/**
+ * Deliver a completed review to any configured integrations. Best-effort: no
+ * configured integration is a no-op, and any failure is reported as a line,
+ * never thrown into the review.
+ */
+async function dispatchReviewIntegrations(config: RepoConfig, report: ReviewReport): Promise<void> {
+  const adapters = buildIntegrations(config);
+  if (adapters.length === 0) {
+    return;
+  }
+
+  try {
+    const results = await dispatchIntegrations(buildIntegrationEvent(report), adapters);
+    for (const result of results) {
+      console.log(
+        result.ok
+          ? ui.muted(`Integration ${result.adapter}: delivered`)
+          : ui.muted(`Integration ${result.adapter}: ${result.error ?? "failed"}`)
+      );
+    }
+  } catch (error) {
+    console.log(ui.muted(`Integration dispatch failed: ${error instanceof Error ? error.message : "error"}`));
   }
 }
 
@@ -338,7 +470,8 @@ async function collectAnalyzerSignals(
   emitter: InProcessReviewEventEmitter,
   repo: string,
   securityMode: boolean,
-  cache: Cache
+  cache: Cache,
+  interactive: boolean
 ): Promise<AnalyzerSignal[]> {
   const { names, skipped: notSelected } = selectAnalyzers(settings.repo, { securityMode });
   if (names.length === 0) {
@@ -347,7 +480,18 @@ async function collectAnalyzerSignals(
   }
 
   const analyzerContext = buildAnalyzerContext(context, { repoRoot: repo, config: settings.repo });
-  const { signals, ran, skipped } = await runAnalyzers(analyzerContext, names, { cache });
+  // Analysis (TypeScript compile, secret scan) is the slow pre-LLM step, so it
+  // gets its own spinner rather than a silent pause.
+  const spinner = interactive
+    ? startSpinner(`Analyzing ${context.reviewable.length} file(s) with ${names.join(", ")}...`)
+    : null;
+  let analyzed;
+  try {
+    analyzed = await runAnalyzers(analyzerContext, names, { cache });
+  } finally {
+    spinner?.stop();
+  }
+  const { signals, ran, skipped } = analyzed;
   const allSkipped = [...notSelected, ...skipped];
 
   await emitter.emit(
@@ -413,8 +557,7 @@ function printResult(result: ReviewResult): void {
     result.findings.forEach((finding, index) => {
       const adjacent = finding.tags.includes(CONTEXT_ADJACENT_TAG) ? ui.muted(" (adjacent to changed lines)") : "";
       console.log(`${index + 1}. ${colorSeverity(finding.severity)} ${finding.title}${adjacent}`);
-      const source = finding.source === "llm" ? "" : ` [${finding.source}]`;
-      console.log(ui.muted(`   ${finding.ruleId}${source}`));
+      console.log(ui.muted(`   ${finding.ruleId} [${finding.source}]`));
       console.log(ui.muted(`   Impact: ${finding.impact}`));
       if (finding.suggestion) {
         console.log(ui.muted(`   Fix:    ${finding.suggestion}`));

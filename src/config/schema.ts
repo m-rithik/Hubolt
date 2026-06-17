@@ -45,6 +45,47 @@ const RepoConfigShape = {
       dependencies: z.boolean().default(true)
     })
     .default({}),
+  integrations: z
+    .object({
+      // Secret env var names are hardcoded (see src/integrations/env-names.ts),
+      // never read from this untrusted config. Only non-secret toggles and
+      // connection targets live here.
+      slack: z
+        .object({
+          enabled: z.boolean().default(false),
+          // Notification floor: only findings at or above this are listed.
+          minSeverity: SeveritySchema.default("high")
+        })
+        .default({}),
+      teams: z
+        .object({
+          enabled: z.boolean().default(false),
+          minSeverity: SeveritySchema.default("high")
+        })
+        .default({}),
+      jira: z
+        .object({
+          enabled: z.boolean().default(false),
+          baseUrl: z.string().default(""),
+          projectKey: z.string().default(""),
+          email: z.string().default(""),
+          issueType: z.string().default("Task")
+        })
+        .default({}),
+      clickup: z
+        .object({
+          enabled: z.boolean().default(false),
+          listId: z.string().default("")
+        })
+        .default({}),
+      asana: z
+        .object({
+          enabled: z.boolean().default(false),
+          projectGid: z.string().default("")
+        })
+        .default({})
+    })
+    .default({}),
   ignore: z.array(z.string()).default([]),
   knowledgeFiles: z.array(z.string()).default([]),
   rules: z.array(z.string()).default([])
