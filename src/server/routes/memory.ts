@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
 import { MemoryService } from "../services/memory.js";
 
 const StyleCardSchema = z.object({
@@ -49,6 +49,9 @@ export function registerMemoryRoutes(fastify: FastifyInstance, context: ServerCo
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const body = StyleCardSchema.parse(request.body);
         const card = await memoryService.saveStyleCard(request.orgId!, body);
@@ -72,6 +75,9 @@ export function registerMemoryRoutes(fastify: FastifyInstance, context: ServerCo
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const removed = await memoryService.deleteCard(request.orgId!, request.params.id);
         if (!removed) {
@@ -92,6 +98,9 @@ export function registerMemoryRoutes(fastify: FastifyInstance, context: ServerCo
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
       try {

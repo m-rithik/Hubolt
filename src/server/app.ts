@@ -83,17 +83,21 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
     });
   }
 
-  // The GitHub App delivers webhooks signed with its own secret; accept that or
-  // the standalone secret used by a manually configured repo webhook.
-  const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET || process.env.GITHUB_APP_WEBHOOK_SECRET;
-  if (webhookSecret && context.redis) {
+  // The GitHub App delivers webhooks signed with its own secret; a manually
+  // configured repo webhook uses the standalone secret. Accept any configured
+  // secret so a delivery signed with either one is not rejected when both are
+  // set to different values.
+  const webhookSecrets = [process.env.GITHUB_WEBHOOK_SECRET, process.env.GITHUB_APP_WEBHOOK_SECRET].filter(
+    (value): value is string => Boolean(value)
+  );
+  if (webhookSecrets.length > 0 && context.redis) {
     const producer = createReviewJobProducer(context.redis);
-    registerWebhookRoutes(fastify, context, { secret: webhookSecret, producer });
+    registerWebhookRoutes(fastify, context, { secrets: webhookSecrets, producer });
     fastify.addHook("onClose", async () => {
       await producer.close();
     });
     console.log("GitHub webhook ingest enabled");
-  } else if (webhookSecret) {
+  } else if (webhookSecrets.length > 0) {
     console.warn("A GitHub webhook secret is set but Redis is unavailable; webhook ingest disabled");
   }
 

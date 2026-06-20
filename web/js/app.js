@@ -285,11 +285,24 @@ function boot() {
   app.classList.remove("connecting");
   sidebar.hidden = false;
   topbar.hidden = false;
+  applyRole();
   buildNav();
   buildSidebarFoot();
   pollHealth();
   healthTimer = setInterval(pollHealth, 30000);
   route();
+}
+
+// Tag the document with the current key's role so admin-only controls hide for
+// viewers (CSS). The server still enforces access; this is only presentation.
+async function applyRole() {
+  let role = "admin";
+  try {
+    role = (await api.me()).role || "admin";
+  } catch {
+    /* default to admin view; the server is the real gate */
+  }
+  document.body.classList.toggle("role-viewer", role !== "admin");
 }
 
 window.addEventListener("hashchange", () => {

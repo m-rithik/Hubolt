@@ -7,9 +7,8 @@ export interface SingleFileReviewOptions {
 }
 
 export function buildSingleFileContext(options: SingleFileReviewOptions): BuiltContext {
-  const { filepath, cwd } = options;
+  const { filepath } = options;
   const fileContent = readFileSync(filepath, "utf8");
-  const fileSize = Buffer.byteLength(fileContent, "utf8");
   const lineCount = fileContent.split("\n").length;
 
   const file: ReviewFile = {
@@ -25,14 +24,8 @@ export function buildSingleFileContext(options: SingleFileReviewOptions): BuiltC
   };
 
   return {
-    cwd,
     scope: "file",
-    reviewable: [file],
-    allFiles: [{ path: filepath, size: fileSize }],
-    addedFiles: [filepath],
-    deletedFiles: [],
-    renamedFiles: [],
-    skipped: [],
-    diffSize: fileSize
-  } as any;
+    files: [file],
+    reviewable: [file]
+  };
 }

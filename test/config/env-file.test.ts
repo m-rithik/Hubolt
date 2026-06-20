@@ -51,6 +51,22 @@ describe("applyEnvUpdates", () => {
     expect(applyEnvUpdates("", { A: "openai", B: "gpt-4o-mini" })).toBe("A=openai\nB=gpt-4o-mini\n");
   });
 
+  test("round-trips a value containing a single quote through dotenv", () => {
+    // Regression: shell-style single-quote escaping ('\'') is not understood by
+    // dotenv, so such a value reloaded as something different. It is now
+    // double-quoted, which dotenv strips back to the original.
+    const result = applyEnvUpdates("", { SECRET: "ab'cd ef" });
+
+    expect(result).toContain(`SECRET="ab'cd ef"`);
+    expect(dotenv.parse(result)).toMatchObject({ SECRET: "ab'cd ef" });
+  });
+
+  test("refuses a value that no dotenv quoting can round-trip", () => {
+    // A single quote together with a double quote cannot be represented in
+    // either dotenv quoting mode; refuse rather than silently corrupt it.
+    expect(() => applyEnvUpdates("", { SECRET: `a'b"c` })).toThrow(/single quote/);
+  });
+
   test("reads existing dotenv values without shell expansion", () => {
     const dir = mkdtempSync(join(tmpdir(), "hubolt-env-file-"));
     try {

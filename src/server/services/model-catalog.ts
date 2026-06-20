@@ -65,15 +65,15 @@ export const MODEL_CATALOG: Record<ProviderName, Record<string, ModelInfo>> = {
     }
   },
   google: {
-    "gemini-2.0-flash": {
-      displayName: "Gemini 2.0 Flash",
+    "gemini-2.5-flash": {
+      displayName: "Gemini 2.5 Flash",
       costPer1kTokens: 0.000075,
       quality: 8,
       latency: 1200,
       available: true
     },
-    "gemini-1.5-pro": {
-      displayName: "Gemini 1.5 Pro",
+    "gemini-2.5-pro": {
+      displayName: "Gemini 2.5 Pro",
       costPer1kTokens: 0.00375,
       quality: 9,
       latency: 2000,

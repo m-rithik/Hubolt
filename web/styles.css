@@ -1353,6 +1353,38 @@ tbody tr:hover td {
   }
 }
 
+/* Viewer (read-only) keys never see admin-only controls. */
+body.role-viewer .admin-only { display: none !important; }
+
+.role-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+}
+.role-badge.role-admin { color: var(--green-2); border-color: rgba(111, 244, 255, 0.5); }
+.role-badge.role-viewer { color: var(--muted); }
+.new-key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.key-actions { display: inline-flex; align-items: center; gap: 8px; }
+.key-actions .key-role,
+.owner-select { width: auto; min-height: 28px; padding: 0 26px 0 8px; font-size: 11px; }
+/* Admins edit the owner via the dropdown; viewers just see the email. */
+body:not(.role-viewer) .owner-text { display: none; }
+.new-key { word-break: break-all; flex: 1; min-width: 240px; }
+.new-key-row button { flex: none; min-height: 30px; padding: 0 12px; }
+.new-key-countdown { font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
+
 /* GitHub repo manager */
 .repo-add { max-width: 760px; }
 

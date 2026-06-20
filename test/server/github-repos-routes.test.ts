@@ -8,13 +8,14 @@ function bearerHeaders(): Record<string, string> {
   return { authorization: `Bearer ${FIXTURE_TOKEN}` };
 }
 
-function makeDb() {
+function makeDb(role: string = "admin") {
   const db: any = {
     apiKey: {
       findUnique: vi.fn().mockResolvedValue({
         id: "key_1",
         orgId: "org_1",
         org: { id: "org_1" },
+        role,
         expiresAt: null,
         lastUsedAt: new Date()
       }),
@@ -172,6 +173,27 @@ describe("github-repos routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ queue: null });
+    await app.close();
+  });
+
+  test("a viewer key can read but not register, remove, or change the model", async () => {
+    const db = makeDb("viewer");
+    const app = buildApp(db);
+
+    // reads are allowed
+    expect((await app.inject({ method: "GET", url: "/github-repos", headers: bearerHeaders() })).statusCode).toBe(200);
+
+    // mutations are forbidden
+    const register = await app.inject({ method: "POST", url: "/github-repos", headers: bearerHeaders(), payload: { url: "https://github.com/owner/repo" } });
+    expect(register.statusCode).toBe(403);
+    expect(db.repository.upsert).not.toHaveBeenCalled();
+
+    const remove = await app.inject({ method: "DELETE", url: "/github-repos/owner/repo", headers: bearerHeaders() });
+    expect(remove.statusCode).toBe(403);
+
+    const model = await app.inject({ method: "PUT", url: "/github-repos/review-model", headers: bearerHeaders(), payload: { provider: "google", model: "x" } });
+    expect(model.statusCode).toBe(403);
+
     await app.close();
   });
 });

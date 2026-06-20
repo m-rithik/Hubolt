@@ -14,7 +14,7 @@ export async function renderBudgets(container, state = {}) {
       : table(
           ["Provider", { label: "Limit / month", numeric: true }, { label: "Used", numeric: true }, "Usage", { label: "Alert at", numeric: true }, ""],
           result.budgets.map((budget) => {
-            const remove = el("button", { class: "quiet-danger", text: "Remove" });
+            const remove = el("button", { class: "quiet-danger admin-only", text: "Remove" });
             remove.addEventListener("click", (event) => {
               confirmInline(event.target.closest("td"), async () => {
                 try {
@@ -43,7 +43,7 @@ export async function renderBudgets(container, state = {}) {
     section(
       "Add or update a budget",
       "Saving an existing provider overwrites its limit and threshold.",
-      el("div", { class: "panel" }, budgetForm(messageSlot, container))
+      el("div", { class: "panel admin-only" }, budgetForm(messageSlot, container))
     )
   );
 }

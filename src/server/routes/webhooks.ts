@@ -5,7 +5,8 @@ import { classifyWebhookEvent, classifyInstallationEvent, type InstallationChang
 import { ReviewJobProducer } from "../../queue/review-jobs.js";
 
 export interface WebhookRouteOptions {
-  secret: string;
+  /** Any configured signing secret; a delivery is accepted if it matches one. */
+  secrets: string[];
   producer: ReviewJobProducer;
 }
 
@@ -47,7 +48,7 @@ export function registerWebhookRoutes(
       const signatureHeader = request.headers["x-hub-signature-256"];
       const signature = typeof signatureHeader === "string" ? signatureHeader : undefined;
 
-      if (!verifyGitHubSignature(options.secret, rawBody, signature)) {
+      if (!options.secrets.some((secret) => verifyGitHubSignature(secret, rawBody, signature))) {
         reply.status(401).send({ processed: false, reason: "invalid signature" } satisfies WebhookResponse);
         return;
       }

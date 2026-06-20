@@ -16,5 +16,8 @@ export default defineConfig({
   },
   datasource: {
     url: process.env["DATABASE_URL"],
+    // Used by `prisma migrate diff --from-migrations` (the db:check-drift
+    // script) to replay tracked migrations into a throwaway database.
+    shadowDatabaseUrl: process.env["SHADOW_DATABASE_URL"],
   },
 });

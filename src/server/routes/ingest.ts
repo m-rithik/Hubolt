@@ -15,12 +15,30 @@ const IngestLineRangeSchema = z
     path: ["lineEnd"]
   });
 
+// z.string().url() accepts javascript:, data:, and ftp: URLs. Repository URLs
+// are stored and later rendered as links in the control panel, so restrict them
+// to http(s) at the ingestion boundary.
+const HttpUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (value) => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === "http:" || protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "Repository URL must use http or https" }
+  );
+
 const IngestPayloadSchema = z.object({
   apiKey: z.string().min(1),
   repository: z.object({
     name: z.string(),
     fullName: z.string(),
-    url: z.string().url()
+    url: HttpUrlSchema
   }),
   review: z.object({
     fingerprint: z.string(),
@@ -85,7 +103,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
   fastify.post<{ Body: IngestPayload; Reply: IngestResponse }>(
     "/ingest/review",
     async (request, reply) => {
-      let reservedUsage: { orgId: string; provider: string; costUsd: number } | null = null;
+      let reservedUsage: { orgId: string; provider: string; model: string; costUsd: number } | null = null;
 
       try {
         const payload = IngestPayloadSchema.parse(request.body);
@@ -109,6 +127,18 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
             success: false,
             reviewId: "",
             message: "API key expired"
+          });
+          return;
+        }
+
+        // Ingest writes reviews/findings and reserves provider budget. The
+        // read-only viewer role must not do either; keys created before roles
+        // existed default to admin so their access is unchanged.
+        if (((apiKey as { role?: string }).role ?? "admin") !== "admin") {
+          reply.status(403).send({
+            success: false,
+            reviewId: "",
+            message: "This API key is read-only"
           });
           return;
         }
@@ -157,7 +187,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
             return;
           }
 
-          reservedUsage = { orgId: apiKey.orgId, provider, costUsd: estimatedCost };
+          reservedUsage = { orgId: apiKey.orgId, provider, model, costUsd: estimatedCost };
         }
 
         // Write the review and its child rows atomically. Without the
@@ -293,8 +323,12 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
 
         fastify.log.error(error);
         if (reservedUsage) {
+          // reserveUsage increments both the monthly budget (when cost > 0) and
+          // the daily rate-limit window; a failure after reservation must
+          // release both, or the slot stays burned for work that never ran.
           try {
             await budgetService.refundUsage(reservedUsage.orgId, reservedUsage.provider, reservedUsage.costUsd);
+            await budgetService.refundRateLimit(reservedUsage.orgId, reservedUsage.provider, reservedUsage.model);
           } catch (refundError) {
             fastify.log.error(refundError);
           }

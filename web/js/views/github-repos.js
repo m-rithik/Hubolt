@@ -33,7 +33,7 @@ export async function renderGitHubRepos(container, state = {}) {
     section(
       "Add repositories",
       "Paste one or more GitHub repository links, one per line. Hubolt reviews every pull request opened on them.",
-      el("div", { class: "panel repo-add" }, addForm(messageSlot, container))
+      el("div", { class: "panel repo-add admin-only" }, addForm(messageSlot, container))
     ),
     section(
       "Connected repositories",
@@ -99,7 +99,7 @@ function reviewEngineSection(model, messageSlot, container) {
     "Reviews use the provider you configured in the Gateway. Choose which model writes the comments.",
     [
       el("p", { class: "section-desc", text: current }),
-      el("div", { class: "panel" }, reviewModelForm(model, messageSlot, container))
+      el("div", { class: "panel admin-only" }, reviewModelForm(model, messageSlot, container))
     ]
   );
 }
@@ -215,7 +215,7 @@ function reposTable(data, messageSlot, container) {
   return table(
     ["Repository", "Status", ""],
     data.repos.map((repo) => {
-      const remove = el("button", { class: "quiet-danger", text: "Remove" });
+      const remove = el("button", { class: "quiet-danger admin-only", text: "Remove" });
       remove.addEventListener("click", (event) => {
         confirmInline(event.target.closest("td"), async () => {
           try {

@@ -33,7 +33,7 @@ export async function renderGateway(container, state = {}) {
       : table(
           ["Provider", "Last used", ""],
           status.configuredProviders.map((entry) => {
-            const remove = el("button", { class: "quiet-danger", text: "Remove" });
+            const remove = el("button", { class: "quiet-danger admin-only", text: "Remove" });
             remove.addEventListener("click", (event) => {
               confirmInline(event.target.closest("td"), async () => {
                 try {
@@ -129,7 +129,7 @@ export async function renderGateway(container, state = {}) {
       "Keys are encrypted at rest and never shown after saving.",
       [
         credentialsBody,
-        el("div", { class: "panel", style: "margin-top:16px" }, credentialForm(messageSlot, container))
+        el("div", { class: "panel admin-only", style: "margin-top:16px" }, credentialForm(messageSlot, container))
       ]
     ),
     section("Queue", null, statStrip([

@@ -44,7 +44,10 @@ export function registerHealthRoutes(fastify: FastifyInstance, context: ServerCo
       await context.db.$queryRaw`SELECT 1`;
       reply.status(200).send({ ready: true });
     } catch (error) {
-      reply.status(503).send({ ready: false, error: String(error) });
+      // This route is public; log the detail server-side but never return raw
+      // dependency errors (they can carry hostnames, ports, or SQL fragments).
+      fastify.log.error(error, "Readiness check failed");
+      reply.status(503).send({ ready: false });
     }
   });
 }

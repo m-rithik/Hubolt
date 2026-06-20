@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
 import { z } from "zod";
 
 const UpdateRateLimitSchema = z.object({
@@ -114,6 +114,9 @@ export function registerRateLimitRoutes(fastify: FastifyInstance, context: Serve
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

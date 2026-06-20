@@ -74,6 +74,43 @@ describe("memory routes", () => {
     await app.close();
   });
 
+  test("rejects mutations from a read-only viewer key but allows reads", async () => {
+    const app = Fastify({ logger: false });
+    const db = makeDb();
+    db.apiKey.findUnique = vi.fn().mockResolvedValue({
+      id: "key_1",
+      orgId: "org_1",
+      org: { id: "org_1" },
+      role: "viewer",
+      expiresAt: null,
+      lastUsedAt: new Date()
+    });
+    registerMemoryRoutes(app, { db });
+
+    const post = await app.inject({
+      method: "POST",
+      url: "/memory/cards",
+      headers: bearerHeaders(),
+      payload: { title: "Style", body: "Prefer small modules." }
+    });
+    expect(post.statusCode).toBe(403);
+
+    const del = await app.inject({ method: "DELETE", url: "/memory/cards/card_1", headers: bearerHeaders() });
+    expect(del.statusCode).toBe(403);
+
+    const rebuild = await app.inject({ method: "POST", url: "/memory/rebuild", headers: bearerHeaders() });
+    expect(rebuild.statusCode).toBe(403);
+
+    // Reads remain available to a viewer.
+    const list = await app.inject({ method: "GET", url: "/memory/cards", headers: bearerHeaders() });
+    expect(list.statusCode).toBe(200);
+
+    expect(db.memoryCard.upsert).not.toHaveBeenCalled();
+    expect(db.memoryCard.delete).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   test("rejects malformed list query parameters", async () => {
     const app = Fastify({ logger: false });
     const db = makeDb();

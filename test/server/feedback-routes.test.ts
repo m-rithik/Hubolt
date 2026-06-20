@@ -107,6 +107,34 @@ describe("POST /feedback", () => {
     await app.close();
   });
 
+  test("rejects feedback from a read-only viewer key", async () => {
+    const app = Fastify({ logger: false });
+    const { db } = makeDb(true);
+    db.apiKey.findUnique = vi.fn().mockResolvedValue({
+      id: "key_1",
+      orgId: "org_1",
+      org: { id: "org_1" },
+      role: "viewer",
+      expiresAt: null,
+      lastUsedAt: new Date()
+    });
+    registerFeedbackRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/feedback",
+      headers: bearerHeaders(),
+      payload: {
+        repo: "owner/repo",
+        events: [{ fingerprint: "fp-1", verdict: "accepted", source: "github-reaction" }]
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.finding.findMany).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   test("scopes feedback attribution to the requested repository", async () => {
     const app = Fastify({ logger: false });
     const { db } = makeDb(true);

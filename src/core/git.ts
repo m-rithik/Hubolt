@@ -48,6 +48,18 @@ export function parseNameStatus(output: string): ChangedFile[] {
   return files;
 }
 
+/**
+ * Reject a ref that git could parse as an option. base/head come from CLI
+ * flags; a value beginning with "-" (e.g. "-foo", which becomes "-foo:path" in
+ * a show/cat-file spec) could otherwise be treated as a git option. Paths come
+ * from git's own diff output and are not user-controlled here.
+ */
+function assertSafeRef(ref: string | undefined, label: string): void {
+  if (ref !== undefined && ref.startsWith("-")) {
+    throw new Error(`Invalid git ${label} ref: must not start with "-"`);
+  }
+}
+
 export function isGitRepository(cwd: string = process.cwd()): boolean {
   try {
     execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
@@ -75,6 +87,8 @@ export function getGitRoot(cwd: string = process.cwd()): string {
 
 export function getChangedFiles(options: ChangedFilesOptions = {}): ChangedFile[] {
   const cwd = options.cwd ?? process.cwd();
+  assertSafeRef(options.base, "base");
+  assertSafeRef(options.head, "head");
   const args = ["diff", "--name-status"];
 
   if (options.base && options.head) {
@@ -96,6 +110,8 @@ export function getChangedFiles(options: ChangedFilesOptions = {}): ChangedFile[
 
 export function getDiffText(options: ChangedFilesOptions = {}): string {
   const cwd = options.cwd ?? process.cwd();
+  assertSafeRef(options.base, "base");
+  assertSafeRef(options.head, "head");
   const args = ["diff", "--unified=3"];
 
   if (options.base && options.head) {
@@ -119,6 +135,8 @@ export function getDiffText(options: ChangedFilesOptions = {}): string {
  */
 export function gitFileSize(path: string, options: ChangedFilesOptions = {}): number | null {
   const cwd = options.cwd ?? process.cwd();
+  assertSafeRef(options.base, "base");
+  assertSafeRef(options.head, "head");
   let ref: string;
 
   if (options.base && options.head) {
@@ -146,6 +164,8 @@ export function gitFileSize(path: string, options: ChangedFilesOptions = {}): nu
  */
 export function gitFileContent(path: string, options: ChangedFilesOptions = {}): string | null {
   const cwd = options.cwd ?? process.cwd();
+  assertSafeRef(options.base, "base");
+  assertSafeRef(options.head, "head");
   let ref: string;
 
   if (options.base && options.head) {

@@ -184,6 +184,7 @@ async function bootstrapServer(options: BootstrapOptions): Promise<void> {
       data: {
         orgId: org.id,
         name: keyName,
+        role: "admin",
         keyHash: hashApiKey(key)
       }
     });

@@ -103,6 +103,32 @@ describe("jira target", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("missing Jira config");
   });
+
+  test("rejects a non-https destination so the token cannot be exfiltrated", async () => {
+    const fetchImpl = vi.fn();
+    const target = createJiraTarget({
+      baseUrl: "http://attacker.example",
+      projectKey: "PROJ",
+      email: "bot@acme.dev",
+      apiToken: "secret",
+      fetchImpl
+    });
+
+    expect(target.available()).toBe(false);
+    const result = await target.createIssue(draft);
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("rejects a destination with embedded credentials", () => {
+    const target = createJiraTarget({
+      baseUrl: "https://user:pass@evil.example",
+      projectKey: "PROJ",
+      email: "bot@acme.dev",
+      apiToken: "secret"
+    });
+    expect(target.available()).toBe(false);
+  });
 });
 
 describe("clickup and asana targets", () => {
@@ -134,16 +160,33 @@ describe("clickup and asana targets", () => {
 });
 
 describe("issue registry", () => {
-  test("builds only enabled targets, with the token from the env", () => {
+  test("builds only enabled targets, with destination and secrets from the env", () => {
     const config = RepoConfigSchema.parse({
       integrations: {
-        jira: { enabled: true, baseUrl: "https://x.atlassian.net", projectKey: "P", email: "a@b.c" },
+        jira: { enabled: true, projectKey: "P" },
         asana: { enabled: true, projectGid: "1" }
       }
     });
-    const targets = buildIssueTargets(config, { env: { HUBOLT_JIRA_TOKEN: "t", HUBOLT_ASANA_TOKEN: "t" } });
+    const targets = buildIssueTargets(config, {
+      env: {
+        HUBOLT_JIRA_TOKEN: "t",
+        HUBOLT_JIRA_BASE_URL: "https://x.atlassian.net",
+        HUBOLT_JIRA_EMAIL: "a@b.c",
+        HUBOLT_ASANA_TOKEN: "t"
+      }
+    });
     expect(targets.map((t) => t.name).sort()).toEqual(["asana", "jira"]);
     expect(targets.every((t) => t.available())).toBe(true);
+  });
+
+  test("ignores a repo-config Jira destination; base and email come from env only", () => {
+    // A hostile .hubolt.yml cannot supply the destination/email paired with the
+    // token, so with no destination env the Jira target is not deliverable.
+    const config = RepoConfigSchema.parse({
+      integrations: { jira: { enabled: true, projectKey: "P" } }
+    });
+    const targets = buildIssueTargets(config, { env: { HUBOLT_JIRA_TOKEN: "t" } });
+    expect(targets.find((t) => t.name === "jira")?.available()).toBe(false);
   });
 
   test("createIssuesIn never throws and collects a result per draft", async () => {

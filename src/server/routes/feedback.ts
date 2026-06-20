@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
 import { FeedbackService } from "../services/feedback.js";
 
 const FeedbackEventSchema = z.object({
@@ -35,6 +35,9 @@ export function registerFeedbackRoutes(fastify: FastifyInstance, context: Server
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

@@ -66,9 +66,11 @@ const RepoConfigShape = {
       jira: z
         .object({
           enabled: z.boolean().default(false),
-          baseUrl: z.string().default(""),
+          // baseUrl and email are NOT here: they form the destination and the
+          // HTTP Basic credential for the Jira token, so they are operator-only
+          // (HUBOLT_JIRA_BASE_URL / HUBOLT_JIRA_EMAIL), never read from this
+          // untrusted repo config. Only non-secret routing lives here.
           projectKey: z.string().default(""),
-          email: z.string().default(""),
           issueType: z.string().default("Task")
         })
         .default({}),

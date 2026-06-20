@@ -1,5 +1,4 @@
 import { Queue, Worker, QueueEvents, type ConnectionOptions } from "bullmq";
-import { createHash } from "node:crypto";
 import { GATEWAY_CONFIG } from "./constants.js";
 import {
   getRedisConnectionOptions,
@@ -61,7 +60,6 @@ export class RequestQueue {
   private queueEvents: QueueEvents;
   private redisConnectionOptions: RedisConnectionOptions;
   private redisClient: any;
-  private maxCacheSize = GATEWAY_CONFIG.MAX_CACHE_SIZE_BYTES;
   private cacheKeyPrefix = "llm:cache:";
 
   constructor(redis: RedisClient | RedisConnectionOptions) {
@@ -104,9 +102,6 @@ export class RequestQueue {
       console.error(`Job ${job?.id} failed:`, err);
     });
 
-    this.worker.on("completed", (job) => {
-      this.cleanOldCache();
-    });
   }
 
   async enqueue(request: QueuedRequest): Promise<EnqueueResult> {
@@ -405,10 +400,6 @@ export class RequestQueue {
     }
   }
 
-  private hashPrompt(prompt: string): string {
-    return createHash("sha256").update(prompt).digest("hex");
-  }
-
   // Tolerates both single- and double-serialized cache entries: callers may
   // pass an already-serialized string, and older entries were stored
   // double-encoded. Parse once, and if that yields a string, try once more.
@@ -455,9 +446,5 @@ export class RequestQueue {
     } catch (error) {
       console.error("Cache storage error:", error);
     }
-  }
-
-  private cleanOldCache(): void {
-    // Redis handles TTL automatically, no manual cleanup needed
   }
 }

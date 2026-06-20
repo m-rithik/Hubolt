@@ -73,9 +73,11 @@ A different shape from notifications: explicit and user-triggered, one issue
 per finding. `buildIssueDrafts(report)` turns a saved report into drafts -
 threshold-filtered, capped (default 25), each carrying severity, location,
 impact, suggestion, verification, and redacted evidence. Targets implement
-`IssueTarget.createIssue(draft)`; connection fields come from config and the
-secret token from an env var (`HUBOLT_JIRA_TOKEN`, `HUBOLT_CLICKUP_TOKEN`,
-`HUBOLT_ASANA_TOKEN`). Creation runs only from the CLI:
+`IssueTarget.createIssue(draft)`. Non-secret routing (project key, issue type,
+ClickUp list, Asana project) comes from config; the credentials and the Jira
+destination come from env vars only (`HUBOLT_JIRA_TOKEN`, `HUBOLT_JIRA_BASE_URL`,
+`HUBOLT_JIRA_EMAIL`, `HUBOLT_CLICKUP_TOKEN`, `HUBOLT_ASANA_TOKEN`). The Jira base
+must be HTTPS. Creation runs only from the CLI:
 
 ```bash
 hubolt issues create --from review.json [--to jira,clickup,asana] \
@@ -101,7 +103,10 @@ Secret env var names are fixed (`HUBOLT_SLACK_WEBHOOK_URL`,
 `HUBOLT_TEAMS_WEBHOOK_URL`, `HUBOLT_JIRA_TOKEN`, `HUBOLT_CLICKUP_TOKEN`,
 `HUBOLT_ASANA_TOKEN`) and are deliberately NOT configurable: repo config is
 untrusted, so it must not be able to point a secret at an arbitrary server env
-var.
+var. For the same reason the Jira destination and email
+(`HUBOLT_JIRA_BASE_URL`, `HUBOLT_JIRA_EMAIL`) are env-only and must not be set
+in `.hubolt.yml`: they form the Basic-auth credential paired with the token, so
+a repo-controlled base could otherwise exfiltrate it. The base must be HTTPS.
 
 ## CLI
 

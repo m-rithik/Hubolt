@@ -60,7 +60,19 @@ async function request(path, options = {}) {
 
 export const api = {
   health: () => request("/health"),
+  me: () => request("/auth/me"),
   org: () => request("/orgs/current"),
+  renameOrg: (name) => request("/orgs/current", { method: "PATCH", body: { name } }),
+  addMember: (body) => request("/orgs/current/members", { method: "POST", body }),
+  updateMemberRole: (memberId, role) =>
+    request(`/orgs/current/members/${encodeURIComponent(memberId)}`, { method: "PATCH", body: { role } }),
+  removeMember: (memberId) =>
+    request(`/orgs/current/members/${encodeURIComponent(memberId)}`, { method: "DELETE" }),
+  createApiKey: (body) => request("/orgs/current/api-keys", { method: "POST", body }),
+  updateApiKey: (keyId, body) =>
+    request(`/orgs/current/api-keys/${encodeURIComponent(keyId)}`, { method: "PATCH", body }),
+  deleteApiKey: (keyId) =>
+    request(`/orgs/current/api-keys/${encodeURIComponent(keyId)}`, { method: "DELETE" }),
 
   reviews: (params = {}) => {
     const query = new URLSearchParams();

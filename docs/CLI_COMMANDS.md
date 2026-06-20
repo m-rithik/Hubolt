@@ -415,7 +415,7 @@ hubolt providers list --verbose # Show API key status
   - Key: `OPENAI_API_KEY`
 
 - **Google**
-  - Models: `gemini-2.0-flash`, `gemini-1.5-pro`
+  - Models: `gemini-2.5-flash`, `gemini-2.5-pro`
   - Key: `GOOGLE_API_KEY`
 
 ---

@@ -24,13 +24,14 @@ import { registerSetupCommand } from "./commands/setup.js";
 import { registerWebhooksCommand } from "./commands/webhooks.js";
 import { registerWorkerCommand } from "./commands/worker.js";
 import { configureCliHelp, renderHome } from "./help.js";
+import { HUBOLT_VERSION } from "../version.js";
 
 const program = new Command();
 
 program
   .name("hubolt")
   .description("Context-aware AI code review assistant that is local-first, not local-only.")
-  .version("0.1.0");
+  .version(HUBOLT_VERSION);
 
 registerSetupCommand(program);
 registerConfigCommand(program);

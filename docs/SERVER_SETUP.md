@@ -122,7 +122,7 @@ Set these for both `hubolt server` and `hubolt worker start`:
 
 ```bash
 GITHUB_APP_ID=123456
-GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+GITHUB_APP_PRIVATE_KEY="<paste the .pem contents on one line, real newlines escaped as \n>"
 GITHUB_APP_SLUG=your-app-slug          # used to build the install link in the UI
 GITHUB_APP_WEBHOOK_SECRET=...          # matches the App's webhook secret
 ```

@@ -268,6 +268,100 @@ describe("server route regressions", () => {
     await app.close();
   });
 
+  test("ingest rejects read-only viewer API keys", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue({ ...authApiKey(), role: "viewer" })
+      },
+      repository: {
+        upsert: vi.fn()
+      }
+    };
+
+    registerIngestRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ingest/review",
+      payload: reviewPayload()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.repository.upsert).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  test("ingest refunds budget and rate-limit usage when the write fails after reservation", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      $transaction: vi.fn(),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $queryRaw: vi.fn(),
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue(authApiKey()),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      repository: {
+        upsert: vi.fn().mockResolvedValue({ id: "repo_1" })
+      },
+      review: {
+        // No existing review, so the request reserves usage before writing.
+        findUnique: vi.fn().mockResolvedValue(null)
+      },
+      auditEvent: {
+        create: vi.fn().mockResolvedValue(undefined)
+      }
+    };
+    // First transaction is the budget/rate reservation (succeeds); the second
+    // is the review write, which fails after the slot has been reserved.
+    db.$transaction
+      .mockImplementationOnce(async () => undefined)
+      .mockImplementationOnce(async () => {
+        throw new Error("review write failed");
+      });
+
+    registerIngestRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ingest/review",
+      payload: reviewPayload()
+    });
+
+    expect(response.statusCode).toBe(500);
+    // refundUsage (budget) and refundRateLimit each issue one raw UPDATE; the
+    // bug refunded only the budget and left the daily rate-limit slot burned.
+    expect(db.$executeRaw).toHaveBeenCalledTimes(2);
+
+    await app.close();
+  });
+
+  test("ingest rejects repository URLs with unsafe schemes", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: { findUnique: vi.fn() },
+      repository: { upsert: vi.fn() }
+    };
+
+    registerIngestRoutes(app, { db } as any);
+
+    for (const url of ["javascript:alert(1)", "data:text/html,hi", "ftp://example.com/x"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/ingest/review",
+        payload: { ...reviewPayload(), repository: { name: "repo", fullName: "owner/repo", url } }
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    // Validation fails before any auth or database work.
+    expect(db.apiKey.findUnique).not.toHaveBeenCalled();
+    expect(db.repository.upsert).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   test("ingest rejects invalid finding line ranges before database writes", async () => {
     const app = Fastify({ logger: false });
     const db: any = {

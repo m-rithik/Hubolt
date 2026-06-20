@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
 import { BudgetService } from "../services/budget.js";
 import { z } from "zod";
 
@@ -115,6 +115,10 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
         return;
       }
 
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
+
       try {
         const body = CreateBudgetSchema.parse(request.body);
 
@@ -189,6 +193,10 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
         return;
       }
 
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
+
       try {
         const { provider } = request.params as { provider: string };
         const body = UpdateBudgetSchema.parse(request.body);
@@ -259,6 +267,10 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

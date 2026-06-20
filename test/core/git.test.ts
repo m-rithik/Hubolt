@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { getGitRoot, parseNameStatus } from "../../src/core/git.js";
+import { getChangedFiles, getDiffText, getGitRoot, parseNameStatus } from "../../src/core/git.js";
 
 describe("parseNameStatus", () => {
   test("parses added, modified, and deleted files", () => {
@@ -24,6 +24,15 @@ describe("parseNameStatus", () => {
 
   test("ignores blank lines and unknown status codes", () => {
     expect(parseNameStatus("\n\nX\tsrc/weird.ts\n")).toEqual([]);
+  });
+});
+
+describe("ref option-injection guard", () => {
+  test("rejects base/head refs that could be parsed as git options", () => {
+    // The guard throws before spawning git, so no repository is needed.
+    expect(() => getChangedFiles({ base: "-foo", head: "main" })).toThrow(/Invalid git base ref/);
+    expect(() => getChangedFiles({ base: "main", head: "--upload-pack=x" })).toThrow(/Invalid git head ref/);
+    expect(() => getDiffText({ base: "-foo", head: "main" })).toThrow(/Invalid git base ref/);
   });
 });
 

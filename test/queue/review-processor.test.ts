@@ -141,6 +141,53 @@ describe("processReviewJob", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  test("skips when the org's monthly budget for the provider is exhausted", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    db.budget = {
+      findUnique: vi.fn(async () => ({
+        id: "b1",
+        provider: "openai",
+        currentMonthCostUsd: 100,
+        monthlyLimitUsd: 50,
+        alertThresholdPct: 80,
+        currentMonthResets: new Date(Date.now() + 1_000_000_000)
+      })),
+      update: vi.fn()
+    };
+    const llm = makeLlm();
+
+    const outcome = await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => llm });
+
+    expect(outcome).toMatchObject({ status: "skipped" });
+    // No model call and no diff fetch once the budget is exhausted.
+    expect(scm.listPullRequestFiles).not.toHaveBeenCalled();
+    expect((llm as unknown as { review: ReturnType<typeof vi.fn> }).review).not.toHaveBeenCalled();
+  });
+
+  test("deducts the review cost from a configured budget after completing", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    const update = vi.fn(async () => undefined);
+    db.budget = {
+      findUnique: vi.fn(async () => ({
+        id: "b1",
+        provider: "openai",
+        currentMonthCostUsd: 1,
+        monthlyLimitUsd: 100,
+        alertThresholdPct: 80,
+        currentMonthResets: new Date(Date.now() + 1_000_000_000)
+      })),
+      update
+    };
+
+    const outcome = await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => makeLlm() });
+
+    expect(outcome.status).toBe("completed");
+    // deductBudget increments currentMonthCostUsd via budget.update.
+    expect(update).toHaveBeenCalled();
+  });
+
   test("runs a full review, persists it, posts results, and records state", async () => {
     const scm = makeScm();
     const { db, tx } = makeDb(null);

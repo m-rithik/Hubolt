@@ -89,6 +89,15 @@ When a review is ingested via POST /ingest/review:
 3. **Deduct Cost**: After successful ingestion, `estimatedCostUsd` from modelUsage is deducted from current month budget
 4. **Alert**: If budget usage exceeds alertThresholdPct, audit event `budget.alert` is created
 
+### Hosted pull-request reviews
+
+Reviews run by the webhook worker (not only CLI ingestion) are gated the same way:
+
+1. **Check Budget**: before fetching the diff or calling the model, the worker checks the org's budget for the selected provider. If it is already exhausted, the review is skipped with no model call. The worker selects Anthropic as `claude`, while budgets key it as `anthropic`; the worker maps between them.
+2. **Deduct Cost**: after a completed review, the model cost (from reported token usage, or a token estimate when the provider reports none) is deducted from the month's budget so the cap accrues across runs.
+
+Both steps are best-effort against the budget subsystem: a budget-system error never blocks a review (fail open on error, closed only on a real overage). Cost accrual uses the gateway cost catalog, so a provider/model not present in the catalog accrues an approximate fallback rate rather than an exact cost.
+
 ### Budget Check Rejection
 
 ```json

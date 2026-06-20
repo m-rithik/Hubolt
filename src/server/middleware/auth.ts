@@ -5,6 +5,8 @@ import { hashApiKey } from "../api-keys.js";
 export interface AuthenticatedRequest extends FastifyRequest {
   authenticated?: boolean;
   orgId?: string;
+  /** Access level of the presented API key: "admin" or "viewer". */
+  role?: string;
 }
 
 /**
@@ -47,6 +49,9 @@ export function createAuthMiddleware(db: PrismaClient) {
 
       request.authenticated = true;
       request.orgId = apiKey.orgId;
+      // Keys created before roles existed have no value; treat them as admin so
+      // existing access is preserved.
+      request.role = (apiKey as { role?: string }).role ?? "admin";
       staleLastUsed = shouldTouchLastUsed(apiKey.lastUsedAt);
     } catch (error) {
       request.server.log.error(error);
@@ -71,4 +76,20 @@ export function createAuthMiddleware(db: PrismaClient) {
 
 export function isAuthenticated(request: AuthenticatedRequest): boolean {
   return Boolean(request.authenticated && request.orgId);
+}
+
+export function isAdmin(request: AuthenticatedRequest): boolean {
+  return request.role === "admin";
+}
+
+/**
+ * Guard for state-changing routes: returns true when the caller is an admin,
+ * otherwise sends 403 and returns false. Call after isAuthenticated.
+ */
+export function requireAdmin(request: AuthenticatedRequest, reply: FastifyReply): boolean {
+  if (!isAdmin(request)) {
+    reply.status(403).send({ error: "Forbidden: this action requires an admin API key" });
+    return false;
+  }
+  return true;
 }

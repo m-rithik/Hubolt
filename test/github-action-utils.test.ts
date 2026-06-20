@@ -30,7 +30,7 @@ describe("GitHubCommentManager", () => {
           listComments: vi.fn().mockResolvedValue({
             data: [
               { id: 1, body: null },
-              { id: 2, body: `report\n\n${COMMENT_MARKER}` }
+              { id: 2, body: `report\n\n${COMMENT_MARKER}`, user: { type: "Bot", login: "github-actions[bot]" } }
             ]
           })
         }
@@ -40,6 +40,55 @@ describe("GitHubCommentManager", () => {
 
     const found = await manager.findExistingComment();
     expect(found?.id).toBe(2);
+  });
+
+  test("does not adopt a marker comment posted by an untrusted PR participant", async () => {
+    const octokit = {
+      rest: {
+        issues: {
+          listComments: vi.fn().mockResolvedValue({
+            data: [
+              { id: 1, body: `spoof\n\n${COMMENT_MARKER}`, user: { type: "User", login: "mallory" }, author_association: "CONTRIBUTOR" },
+              { id: 2, body: `real report\n\n${COMMENT_MARKER}`, user: { type: "Bot", login: "github-actions[bot]" }, author_association: "NONE" }
+            ]
+          })
+        }
+      }
+    };
+    const manager = new GitHubCommentManager(octokit, "owner", "repo", 1);
+
+    const found = await manager.findExistingComment();
+    expect(found?.id).toBe(2);
+  });
+
+  test("ignores a lone marker comment from an untrusted author", async () => {
+    const octokit = {
+      rest: {
+        issues: {
+          listComments: vi.fn().mockResolvedValue({
+            data: [{ id: 1, body: `spoof\n\n${COMMENT_MARKER}`, user: { type: "User", login: "mallory" }, author_association: "NONE" }]
+          })
+        }
+      }
+    };
+    const manager = new GitHubCommentManager(octokit, "owner", "repo", 1);
+
+    expect(await manager.findExistingComment()).toBeUndefined();
+  });
+
+  test("adopts a marker comment from a repo maintainer (PAT-based posting)", async () => {
+    const octokit = {
+      rest: {
+        issues: {
+          listComments: vi.fn().mockResolvedValue({
+            data: [{ id: 9, body: `report\n\n${COMMENT_MARKER}`, user: { type: "User", login: "maintainer" }, author_association: "MEMBER" }]
+          })
+        }
+      }
+    };
+    const manager = new GitHubCommentManager(octokit, "owner", "repo", 1);
+
+    expect((await manager.findExistingComment())?.id).toBe(9);
   });
 
   test("checks the GitHub rate limit endpoint", async () => {

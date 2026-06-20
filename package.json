@@ -58,6 +58,7 @@
     "dev": "tsx src/cli/index.ts",
     "dev:server": "tsx src/server/index.ts",
     "server": "node dist/server/index.js",
+    "pretypecheck": "npx prisma generate",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
@@ -65,6 +66,7 @@
     "db:stop": "docker-compose down",
     "db:reset": "npx prisma migrate reset --force",
     "db:migrate": "npx prisma migrate deploy",
+    "db:check-drift": "npx prisma migrate diff --from-migrations ./prisma/migrations --to-schema ./prisma/schema.prisma --exit-code",
     "db:studio": "npx prisma studio"
   },
   "dependencies": {

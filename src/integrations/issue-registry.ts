@@ -1,7 +1,13 @@
 import type { RepoConfig } from "../config/schema.js";
 import { createAsanaTarget } from "./asana.js";
 import { createClickUpTarget } from "./clickup.js";
-import { ASANA_TOKEN_ENV, CLICKUP_TOKEN_ENV, JIRA_TOKEN_ENV } from "./env-names.js";
+import {
+  ASANA_TOKEN_ENV,
+  CLICKUP_TOKEN_ENV,
+  JIRA_BASE_URL_ENV,
+  JIRA_EMAIL_ENV,
+  JIRA_TOKEN_ENV
+} from "./env-names.js";
 import { createJiraTarget } from "./jira.js";
 import type { IssueDraft, IssueResult, IssueTarget } from "./issues.js";
 
@@ -11,8 +17,10 @@ export interface BuildIssueTargetsDeps {
 }
 
 /**
- * Build the issue-tracker targets a repo has enabled. Connection fields come
- * from config; the secret token comes from the environment, never config.
+ * Build the issue-tracker targets a repo has enabled. Repo config only toggles
+ * an integration and supplies non-secret routing (project key, issue type). The
+ * destination and credentials (Jira base URL + email + token) come from the
+ * environment, never from the untrusted repo config.
  */
 export function buildIssueTargets(config: RepoConfig, deps: BuildIssueTargetsDeps = {}): IssueTarget[] {
   const env = deps.env ?? process.env;
@@ -22,9 +30,9 @@ export function buildIssueTargets(config: RepoConfig, deps: BuildIssueTargetsDep
   if (jira.enabled) {
     targets.push(
       createJiraTarget({
-        baseUrl: jira.baseUrl,
+        baseUrl: env[JIRA_BASE_URL_ENV]?.trim() || undefined,
         projectKey: jira.projectKey,
-        email: jira.email,
+        email: env[JIRA_EMAIL_ENV]?.trim() || undefined,
         issueType: jira.issueType,
         apiToken: env[JIRA_TOKEN_ENV]?.trim() || undefined,
         fetchImpl: deps.fetchImpl

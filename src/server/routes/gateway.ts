@@ -5,7 +5,7 @@ import { LLMGateway } from "../services/llm-gateway.js";
 import { MODEL_CATALOG } from "../services/model-catalog.js";
 import { isGatewayError, getErrorStatusCode, getErrorMessage } from "../services/errors.js";
 import { ValidationError } from "../services/validation.js";
-import { createAuthMiddleware, type AuthenticatedRequest } from "../middleware/auth.js";
+import { createAuthMiddleware, requireAdmin, type AuthenticatedRequest } from "../middleware/auth.js";
 
 const ConfigureCredentialSchema = z.object({
   provider: z.enum(["anthropic", "openai", "google"]),
@@ -34,6 +34,9 @@ export async function registerGatewayRoutes(
     "/gateway/credentials",
     { preHandler: [authMiddleware] },
     async (request: AuthenticatedRequest, reply: FastifyReply) => {
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const body = ConfigureCredentialSchema.parse(request.body);
         const orgId = request.orgId!;
@@ -70,6 +73,9 @@ export async function registerGatewayRoutes(
     "/gateway/credentials/:provider",
     { preHandler: [authMiddleware] },
     async (request: AuthenticatedRequest & { params: { provider: string } }, reply: FastifyReply) => {
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const orgId = request.orgId!;
         const provider = request.params.provider;
@@ -127,6 +133,11 @@ export async function registerGatewayRoutes(
     "/gateway/complete",
     { preHandler: [authMiddleware] },
     async (request: AuthenticatedRequest, reply: FastifyReply) => {
+      // Completing a request spends the org's provider budget; that is not a
+      // read-only action, so a viewer key must not reach the provider.
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const body = ProcessRequestSchema.parse(request.body);
         const orgId = request.orgId!;

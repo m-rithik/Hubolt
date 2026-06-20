@@ -48,11 +48,6 @@ jobs:
 
       - run: npm test
 
-      # Reports when prisma/migrations no longer reproduces schema.prisma,
-      # catching a schema change committed without a migration. Non-blocking
-      # for now: the repo has pre-existing drift (foreign-key representation
-      # differences and the gateway_logs index/PK rename) that must be
-      # reconciled with a follow-up migration before this gate can be made
-      # blocking by removing continue-on-error.
+      # Fails the build when prisma/migrations no longer reproduces
+      # schema.prisma, catching a schema change committed without a migration.
       - run: npm run db:check-drift
-        continue-on-error: true

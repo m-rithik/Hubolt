@@ -123,8 +123,8 @@ function attachWorkerLogging(worker: Worker): void {
 /**
  * Resolve the LLM for a review job: the org's gateway-selected provider/model
  * wins, then the repo/.hubolt.yml/env config. The API key comes from the org's
- * encrypted gateway credential; when absent, apiKey stays undefined and the
- * provider factory falls back to its environment variable.
+ * encrypted gateway credential; when no credential is configured, apiKey stays
+ * undefined and the provider factory falls back to its environment variable.
  */
 async function createReviewLlm(db: PrismaClient, job: ReviewJob, config: RepoConfig): Promise<LLMProvider> {
   let provider = config.providers.llm;
@@ -150,10 +150,16 @@ async function createReviewLlm(db: PrismaClient, job: ReviewJob, config: RepoCon
 
 /**
  * The org's gateway-stored API key for a provider, or undefined to let the
- * provider factory use its env var. Best-effort: a missing master key or a
- * decrypt failure must never crash the review.
+ * provider factory use its env var.
+ *
+ * Fail closed in hosted mode: getCredential returns null when the org has
+ * configured no credential for this provider (env fallback is correct there),
+ * but throws when a stored credential cannot be decrypted. Letting that error
+ * propagate fails the review job rather than silently using the operator's
+ * environment key and billing the wrong account. With no master key set there
+ * are no stored credentials to resolve (single-tenant), so env fallback stands.
  */
-async function resolveGatewayApiKey(
+export async function resolveGatewayApiKey(
   db: PrismaClient,
   orgId: string,
   provider: string
@@ -162,15 +168,7 @@ async function resolveGatewayApiKey(
     return undefined;
   }
 
-  try {
-    const manager = new CredentialManager(db);
-    const key = await manager.getCredential(orgId, provider, { touchLastUsed: true });
-    return key ?? undefined;
-  } catch (error) {
-    console.warn(
-      `Gateway credential lookup failed for ${provider}; falling back to env:`,
-      error instanceof Error ? error.message : error
-    );
-    return undefined;
-  }
+  const manager = new CredentialManager(db);
+  const key = await manager.getCredential(orgId, provider, { touchLastUsed: true });
+  return key ?? undefined;
 }

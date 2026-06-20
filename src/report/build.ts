@@ -6,8 +6,9 @@ import type { AnalyzerSignal, Finding, Severity } from "../types/finding.js";
 import { EMPTY_SEVERITY_COUNTS, type ReviewReport, type SeverityCounts } from "../types/reports.js";
 // Pure pricing data shared with the server's gateway; no runtime coupling.
 import { getModelInfo } from "../server/services/model-catalog.js";
+import { HUBOLT_VERSION } from "../version.js";
 
-export const HUBOLT_VERSION = "0.1.0";
+export { HUBOLT_VERSION };
 
 export interface BuildReportParams {
   scope: string;

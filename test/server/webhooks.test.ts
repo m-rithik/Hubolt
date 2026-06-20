@@ -160,7 +160,22 @@ describe("webhook route", () => {
       }
     };
 
-    registerWebhookRoutes(app, { db } as any, { secret: WEBHOOK_SIGNING_KEY, producer });
+    registerWebhookRoutes(app, { db } as any, { secrets: [WEBHOOK_SIGNING_KEY], producer });
+    return { app, enqueue, db };
+  }
+
+  function buildAppWithSecrets(secrets: string[], repos: Array<{ id: string; orgId: string }>) {
+    const app = Fastify({ logger: false });
+    const enqueue = vi.fn(async (job: ReviewJob) => ({ jobId: reviewJobId(job), created: true }));
+    const producer = { enqueue, close: vi.fn() } as unknown as ReviewJobProducer;
+    const db: any = {
+      repository: {
+        findMany: vi.fn(async () => repos),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 }))
+      }
+    };
+    registerWebhookRoutes(app, { db } as any, { secrets, producer });
     return { app, enqueue, db };
   }
 
@@ -180,6 +195,38 @@ describe("webhook route", () => {
     const response = await inject(app, body, {
       "x-github-event": "pull_request",
       "x-hub-signature-256": computeGitHubSignature("wrong-secret", body)
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(enqueue).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("accepts a delivery signed with either configured secret", async () => {
+    const standalone = "standalone-secret";
+    const appSecret = "app-secret";
+    const { app, enqueue } = buildAppWithSecrets([standalone, appSecret], [{ id: "repo_1", orgId: "org_1" }]);
+    const body = Buffer.from(JSON.stringify(pullRequestPayload()));
+
+    // Signed with the App secret while the standalone secret is also configured;
+    // the old single-secret behaviour rejected this with a 401.
+    const response = await inject(app, body, {
+      "x-github-event": "pull_request",
+      "x-hub-signature-256": computeGitHubSignature(appSecret, body)
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(enqueue).toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("rejects a delivery signed with none of the configured secrets", async () => {
+    const { app, enqueue } = buildAppWithSecrets(["secret-a", "secret-b"], [{ id: "repo_1", orgId: "org_1" }]);
+    const body = Buffer.from(JSON.stringify(pullRequestPayload()));
+
+    const response = await inject(app, body, {
+      "x-github-event": "pull_request",
+      "x-hub-signature-256": computeGitHubSignature("secret-c", body)
     });
 
     expect(response.statusCode).toBe(401);

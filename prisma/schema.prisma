@@ -100,6 +100,8 @@ model OrganizationMember {
 
   role String @default("viewer")
 
+  apiKeys ApiKey[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -129,10 +131,21 @@ model ApiKey {
   keyHash    String    @unique @db.VarChar(255)
   lastUsedAt DateTime?
 
+  // Access level for this key. "admin" can change state (register repos, manage
+  // keys, set credentials/budgets); "viewer" is read-only. Defaults to admin so
+  // existing keys keep working.
+  role String @default("admin")
+
+  // Optional owner: the org member this key belongs to. Cleared (not deleted)
+  // when the member is removed.
+  memberId String?
+  member   OrganizationMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
   createdAt DateTime  @default(now())
   expiresAt DateTime?
 
   @@index([keyHash])
+  @@index([memberId])
   @@map("api_keys")
 }
 

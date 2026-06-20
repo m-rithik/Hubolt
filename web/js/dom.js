@@ -5,6 +5,24 @@
 
 import { countUp } from "./fx.js";
 
+/**
+ * Defense in depth for link attributes: API data (e.g. a repository URL) must
+ * never become a javascript:/data: href. Allow relative and anchor links and
+ * http(s)/mailto absolute links; anything else collapses to "#".
+ */
+export function safeHref(value) {
+  const v = String(value ?? "").trim();
+  if (v === "" || v.startsWith("#") || v.startsWith("/") || v.startsWith("./") || v.startsWith("../")) {
+    return v || "#";
+  }
+  try {
+    const protocol = new URL(v).protocol;
+    return protocol === "http:" || protocol === "https:" || protocol === "mailto:" ? v : "#";
+  } catch {
+    return "#";
+  }
+}
+
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
 
@@ -16,6 +34,8 @@ export function el(tag, attrs = {}, children = []) {
       node.textContent = value;
     } else if (name.startsWith("on") && typeof value === "function") {
       node.addEventListener(name.slice(2), value);
+    } else if (name === "href") {
+      node.setAttribute("href", safeHref(value));
     } else {
       node.setAttribute(name, value);
     }

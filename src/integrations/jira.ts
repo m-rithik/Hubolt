@@ -14,9 +14,32 @@ export interface JiraTargetOptions {
  * description). Auth is HTTP Basic with email + API token. Missing config
  * yields a failed IssueResult rather than throwing.
  */
+/**
+ * The Jira base receives an HTTP Basic credential (email + API token), so it
+ * must be HTTPS and carry no embedded userinfo. Reject anything else so a
+ * misconfigured or hostile destination cannot exfiltrate the token. Returns the
+ * trimmed base without a trailing slash, or "" when the URL is untrusted.
+ */
+function toTrustedHttpsBase(raw: string | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!value) {
+    return "";
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "";
+  }
+  if (url.protocol !== "https:" || url.username || url.password) {
+    return "";
+  }
+  return value.replace(/\/+$/, "");
+}
+
 export function createJiraTarget(options: JiraTargetOptions): IssueTarget {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const base = (options.baseUrl ?? "").replace(/\/+$/, "");
+  const base = toTrustedHttpsBase(options.baseUrl);
   const ready = Boolean(base && options.projectKey && options.email && options.apiToken);
 
   return {

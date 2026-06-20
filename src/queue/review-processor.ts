@@ -14,6 +14,8 @@ import { collectPrFeedback } from "../feedback/github.js";
 import { applyFeedback } from "../memory/apply.js";
 import { FeedbackService } from "../server/services/feedback.js";
 import { MemoryService } from "../server/services/memory.js";
+import { BudgetService } from "../server/services/budget.js";
+import { CostEstimator } from "../server/services/cost-estimator.js";
 import { buildIntegrations, dispatchIntegrations } from "../integrations/registry.js";
 import { buildIntegrationEvent } from "../integrations/event.js";
 import type { ReviewReport } from "../types/reports.js";
@@ -82,6 +84,27 @@ export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps
   }
 
   const config = await loadHostedConfig(scm, job.headSha);
+
+  // Budget gate: if the org configured a monthly budget for this provider and it
+  // is already exhausted, skip before fetching files or calling the model. The
+  // worker selects providers by config id ("claude"), while budgets key
+  // Anthropic as "anthropic"; toGatewayProvider reconciles the two. Best-effort:
+  // a budget-system error must not block reviews - fail open on error, closed
+  // only on a real overage.
+  const budgetService = new BudgetService(deps.db);
+  const budgetProvider = toGatewayProvider(config.providers.llm);
+  try {
+    const budget = await budgetService.checkBudget(job.orgId, budgetProvider, 0);
+    if (!budget.allowed) {
+      return { status: "skipped", reason: budget.reason ?? "monthly budget exhausted" };
+    }
+  } catch (error) {
+    console.warn(
+      `Budget check failed for PR #${job.prNumber}; proceeding without it:`,
+      error instanceof Error ? error.message : error
+    );
+  }
+
   const files = await scm.listPullRequestFiles(job.prNumber);
 
   const feedbackService = new FeedbackService(deps.db);
@@ -124,6 +147,28 @@ export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps
 
   const llm = await deps.createLlm(config, job);
   const result = await runReviewPipeline({ context, config, llm, memory: memoryCards });
+
+  // Record what the model call cost so a configured budget accrues toward its
+  // cap (the gate above reads this on the next run). Prefer real token usage;
+  // fall back to a token estimate when the provider reported none. Best-effort:
+  // never fail or re-bill a completed review over bookkeeping.
+  try {
+    const costEstimator = new CostEstimator();
+    const cost = result.usage
+      ? costEstimator.calculateActualCost(
+          budgetProvider,
+          config.providers.model,
+          result.usage.inputTokens,
+          result.usage.outputTokens
+        )
+      : costEstimator.estimateCost(budgetProvider, config.providers.model);
+    await budgetService.deductBudget(job.orgId, budgetProvider, cost);
+  } catch (error) {
+    console.warn(
+      `Budget deduction failed for PR #${job.prNumber}:`,
+      error instanceof Error ? error.message : error
+    );
+  }
 
   // Apply team feedback history: suppress what the team has repeatedly
   // rejected, demote doubtful classes to the summary, calibrate confidence.
@@ -491,6 +536,15 @@ function buildMergeConflictFinding(job: ReviewJob, mergeableState?: string): Fin
     relatedSignals: [],
     tags: []
   };
+}
+
+/**
+ * Reconcile the worker's provider id with the gateway/budget provider name:
+ * the config selects Anthropic as "claude", while budgets, the cost catalog,
+ * and gateway usage key it as "anthropic". Other providers share the same id.
+ */
+function toGatewayProvider(configProvider: string): string {
+  return configProvider === "claude" ? "anthropic" : configProvider;
 }
 
 function dedupeFindingsByFingerprint<T extends { fingerprint: string }>(findings: T[]): T[] {

@@ -1,5 +1,18 @@
 const COMMENT_MARKER = "<!-- hubolt-review-comment -->";
 const RATE_LIMIT_THRESHOLD = 10;
+// Authors trusted to own the managed comment. The marker alone is not enough:
+// any PR participant can post it, so without an author check the action would
+// adopt (and overwrite) a spoofed comment. The GitHub Actions token posts as a
+// Bot; maintainers (OWNER/MEMBER/COLLABORATOR) are also trusted. Untrusted fork
+// authors (CONTRIBUTOR/NONE) are ignored so they cannot hijack the comment.
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+function isTrustedCommentAuthor(comment) {
+  return (
+    comment.user?.type === "Bot" ||
+    TRUSTED_AUTHOR_ASSOCIATIONS.has(comment.author_association)
+  );
+}
 
 class GitHubCommentManager {
   constructor(octokit, owner, repo, issueNumber) {
@@ -12,7 +25,7 @@ class GitHubCommentManager {
   async findExistingComment() {
     try {
       const comments = await this.getAllComments();
-      return comments.find((c) => c.body?.includes(COMMENT_MARKER));
+      return comments.find((c) => c.body?.includes(COMMENT_MARKER) && isTrustedCommentAuthor(c));
     } catch (error) {
       console.error("Error finding existing comment:", error.message);
       throw error;
@@ -130,5 +143,6 @@ function exponentialBackoff(baseDelayMs, maxAttempts) {
 module.exports = {
   GitHubCommentManager,
   exponentialBackoff,
+  isTrustedCommentAuthor,
   COMMENT_MARKER
 };

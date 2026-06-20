@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { Queue } from "bullmq";
 import { z } from "zod";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
 import { gitHubAppInstallUrl, isGitHubAppConfigured } from "../services/github-app.js";
 import { CredentialManager } from "../services/credential-manager.js";
 import { REVIEW_QUEUE_NAME } from "../../queue/review-jobs.js";
@@ -83,6 +83,9 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
 
       let body: z.infer<typeof RegisterRepoSchema>;
       try {
@@ -146,6 +149,9 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
 
@@ -220,6 +226,9 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

@@ -4,17 +4,32 @@ import dotenv from "dotenv";
 /**
  * Bare (unquoted) is only safe for simple tokens. Anything with whitespace or
  * shell metacharacters (spaces, ; & | $ ` ( ) etc., or URL query chars like
- * ? & = %) is single-quoted, so the value is a shell literal if the file is
- * sourced and dotenv strips the quotes back to the original on load.
+ * ? & = %) is quoted so dotenv strips the quotes back to the original on load
+ * (the .env file is read with dotenv.parse and loaded with dotenv.config).
  */
 const BARE_ENV_VALUE = /^[A-Za-z0-9_./:@+-]*$/;
 
+/**
+ * Quote a value so dotenv round-trips it exactly. dotenv reads a single-quoted
+ * value literally but offers no escape for an embedded single quote, so such
+ * values are double-quoted instead. Inside double quotes dotenv only unescapes
+ * \n and \r and cannot carry a literal double quote, backslash, or newline, so
+ * a value mixing a single quote with any of those is rejected rather than
+ * written in a form that would reload as something different.
+ */
 function serializeEnvValue(value: string): string {
   if (BARE_ENV_VALUE.test(value)) {
     return value;
   }
-  // Single-quote; escape any embedded single quote the shell way: ' -> '\''
-  return `'${value.replace(/'/g, "'\\''")}'`;
+  if (!value.includes("'")) {
+    return `'${value}'`;
+  }
+  if (/["\\\r\n]/.test(value)) {
+    throw new Error(
+      "Cannot store an env value containing a single quote together with a double quote, backslash, or newline"
+    );
+  }
+  return `"${value}"`;
 }
 
 /**
