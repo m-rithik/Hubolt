@@ -60,6 +60,14 @@ export interface PullRequestInfo {
   baseSha: string;
   baseRef: string;
   draft: boolean;
+  /**
+   * GitHub's mergeability verdict. `false` means the PR has conflicts with its
+   * base; `null` means GitHub has not finished computing it yet. Absent when the
+   * SCM does not report it.
+   */
+  mergeable?: boolean | null;
+  /** Raw mergeable_state (e.g. "clean", "dirty", "blocked", "behind"). */
+  mergeableState?: string;
 }
 
 export interface ScmProvider {

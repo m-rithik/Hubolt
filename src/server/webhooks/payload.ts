@@ -25,7 +25,10 @@ const WebhookPullRequestSchema = z.object({
 export const PullRequestEventSchema = z.object({
   action: z.string().min(1),
   pull_request: WebhookPullRequestSchema,
-  repository: WebhookRepositorySchema
+  repository: WebhookRepositorySchema,
+  // Present when delivered by a GitHub App installation; used to mint the
+  // installation token that lets the worker post the review.
+  installation: z.object({ id: z.number().int().positive() }).optional()
 });
 export type PullRequestEvent = z.infer<typeof PullRequestEventSchema>;
 
@@ -71,4 +74,57 @@ export function classifyWebhookEvent(eventName: string | undefined, body: unknow
   }
 
   return { kind: "review", event };
+}
+
+const InstallationRepoSchema = z.object({ full_name: z.string().min(1) });
+
+const InstallationEventSchema = z.object({
+  action: z.string().min(1),
+  installation: z.object({ id: z.number().int().positive() }),
+  repositories: z.array(InstallationRepoSchema).optional(),
+  repositories_added: z.array(InstallationRepoSchema).optional(),
+  repositories_removed: z.array(InstallationRepoSchema).optional()
+});
+
+export interface InstallationChange {
+  installationId: string;
+  /** Repos (full names) this installation now covers. */
+  linked: string[];
+  /** Repos no longer covered (uninstalled, suspended, or removed). */
+  unlinked: string[];
+}
+
+const INSTALLATION_REMOVED_ACTIONS = new Set(["deleted", "suspend"]);
+
+/**
+ * Normalize an `installation` or `installation_repositories` webhook into the
+ * set of repos to mark installed or no longer installed. Returns null for any
+ * other event so the caller can fall through to pull-request handling.
+ */
+export function classifyInstallationEvent(eventName: string | undefined, body: unknown): InstallationChange | null {
+  if (eventName !== "installation" && eventName !== "installation_repositories") {
+    return null;
+  }
+
+  const parsed = InstallationEventSchema.safeParse(body);
+  if (!parsed.success) {
+    return null;
+  }
+
+  const event = parsed.data;
+  const installationId = String(event.installation.id);
+  const names = (repos: typeof event.repositories): string[] => (repos ?? []).map((repo) => repo.full_name);
+
+  if (eventName === "installation") {
+    if (INSTALLATION_REMOVED_ACTIONS.has(event.action)) {
+      return { installationId, linked: [], unlinked: names(event.repositories) };
+    }
+    return { installationId, linked: names(event.repositories), unlinked: [] };
+  }
+
+  return {
+    installationId,
+    linked: names(event.repositories_added),
+    unlinked: names(event.repositories_removed)
+  };
 }

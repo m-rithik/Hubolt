@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import { processReviewJob } from "../../src/queue/review-processor.js";
+import { processReviewJob, applyServerProviderDefault } from "../../src/queue/review-processor.js";
+import { RepoConfigSchema } from "../../src/config/schema.js";
 import type { ReviewJob } from "../../src/queue/review-jobs.js";
 import type { ScmProvider } from "../../src/providers/scm/scm.interface.js";
 import type { LLMProvider } from "../../src/types/providers.js";
@@ -498,6 +499,96 @@ describe("processReviewJob", () => {
       );
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  test("adds a merge-conflict note when GitHub reports the PR as not mergeable", async () => {
+    const scm = makeScm({
+      getPullRequest: vi.fn(async () => ({
+        number: 7,
+        headSha: "headsha123",
+        baseSha: "base456",
+        baseRef: "main",
+        draft: false,
+        mergeable: false,
+        mergeableState: "dirty"
+      }))
+    });
+    const { db, tx } = makeDb(null);
+
+    const outcome = await processReviewJob(JOB, {
+      db,
+      createScm: () => scm,
+      createLlm: () => makeLlm()
+    });
+
+    expect(outcome.status).toBe("completed");
+
+    // Recorded like any other finding.
+    const createdFindings = (tx.finding.createMany as any).mock.calls[0][0].data;
+    expect(createdFindings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ ruleId: "git.merge-conflict", severity: "high" })])
+    );
+
+    // Surfaced in the summary comment (summary-only, not inline).
+    const summaryBody = (scm.createIssueComment as any).mock.calls[0][1];
+    expect(summaryBody).toContain("Merge conflict with the base branch");
+  });
+
+  test("adds no merge-conflict note while mergeability is still unknown", async () => {
+    const scm = makeScm({
+      getPullRequest: vi.fn(async () => ({
+        number: 7,
+        headSha: "headsha123",
+        baseSha: "base456",
+        baseRef: "main",
+        draft: false,
+        mergeable: null
+      }))
+    });
+    const { db, tx } = makeDb(null);
+
+    await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => makeLlm() });
+
+    const createdFindings = (tx.finding.createMany as any).mock.calls[0]?.[0]?.data ?? [];
+    expect(createdFindings.some((finding: any) => finding.ruleId === "git.merge-conflict")).toBe(false);
+  });
+});
+
+describe("applyServerProviderDefault", () => {
+  test("falls back to HUBOLT_LLM_PROVIDER/MODEL when the repo pins none", () => {
+    vi.stubEnv("HUBOLT_LLM_PROVIDER", "google");
+    vi.stubEnv("HUBOLT_LLM_MODEL", "gemini-flash-latest");
+    try {
+      const config = applyServerProviderDefault(RepoConfigSchema.parse({}), {});
+      expect(config.providers.llm).toBe("google");
+      expect(config.providers.model).toBe("gemini-flash-latest");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  test("an explicit repo provider wins over the server env", () => {
+    vi.stubEnv("HUBOLT_LLM_PROVIDER", "google");
+    vi.stubEnv("HUBOLT_LLM_MODEL", "gemini-flash-latest");
+    try {
+      const yaml = { providers: { llm: "anthropic", model: "claude-x" } };
+      const config = applyServerProviderDefault(RepoConfigSchema.parse(yaml), yaml);
+      expect(config.providers.llm).toBe("anthropic");
+      expect(config.providers.model).toBe("claude-x");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  test("keeps schema defaults when no env override is set", () => {
+    vi.stubEnv("HUBOLT_LLM_PROVIDER", "");
+    vi.stubEnv("HUBOLT_LLM_MODEL", "");
+    try {
+      const config = applyServerProviderDefault(RepoConfigSchema.parse({}), {});
+      expect(config.providers.llm).toBe("openai");
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 });

@@ -10,28 +10,6 @@ export class PatternMatcher {
     private maxInputChars: number = DEFAULT_MAX_INPUT_CHARS
   ) {}
 
-  private testWithTimeout(regex: RegExp, text: string): boolean {
-    if (!this.canRun(regex, text)) {
-      return false;
-    }
-
-    const start = Date.now();
-    let match;
-
-    try {
-      match = regex.test(text);
-      if (Date.now() - start > this.timeoutMs) {
-        console.warn(
-          `Regex test exceeded timeout (${this.timeoutMs}ms): ${regex.source.substring(0, 50)}...`
-        );
-      }
-      return match;
-    } catch (error) {
-      console.warn(`Regex error (likely ReDoS): ${regex.source.substring(0, 50)}...`);
-      return false;
-    }
-  }
-
   private execWithTimeout(regex: RegExp, text: string): RegExpExecArray | null {
     const start = Date.now();
     let result;

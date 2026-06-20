@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, test, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { GitHubCommentManager } = require("../.github/actions/review/utils.cjs");
+const { GitHubCommentManager, COMMENT_MARKER } = require("../.github/actions/review/utils.cjs");
 
 describe("GitHubCommentManager", () => {
   test("propagates comment lookup errors so retry wrappers can retry", async () => {
@@ -21,6 +21,25 @@ describe("GitHubCommentManager", () => {
     expect(octokit.rest.issues.listComments).toHaveBeenCalledOnce();
 
     log.mockRestore();
+  });
+
+  test("ignores comments with no body when finding the marker", async () => {
+    const octokit = {
+      rest: {
+        issues: {
+          listComments: vi.fn().mockResolvedValue({
+            data: [
+              { id: 1, body: null },
+              { id: 2, body: `report\n\n${COMMENT_MARKER}` }
+            ]
+          })
+        }
+      }
+    };
+    const manager = new GitHubCommentManager(octokit, "owner", "repo", 1);
+
+    const found = await manager.findExistingComment();
+    expect(found?.id).toBe(2);
   });
 
   test("checks the GitHub rate limit endpoint", async () => {

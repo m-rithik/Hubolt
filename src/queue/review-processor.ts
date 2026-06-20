@@ -17,13 +17,22 @@ import { MemoryService } from "../server/services/memory.js";
 import { buildIntegrations, dispatchIntegrations } from "../integrations/registry.js";
 import { buildIntegrationEvent } from "../integrations/event.js";
 import type { ReviewReport } from "../types/reports.js";
+import type { Finding } from "../types/finding.js";
 
 const MEMORY_RULE_LOOKBACK_LIMIT = 50;
 
 export interface ReviewProcessorDeps {
   db: PrismaClient;
-  createScm: (job: ReviewJob) => ScmProvider;
-  createLlm: (config: RepoConfig) => LLMProvider;
+  /**
+   * Build the SCM client for a job. Async because a GitHub App installation
+   * token is minted on demand; the env-token path resolves synchronously.
+   */
+  createScm: (job: ReviewJob) => ScmProvider | Promise<ScmProvider>;
+  /**
+   * Build the LLM for a job. Receives the job so the worker can resolve the
+   * org's gateway-stored credential and provider/model selection.
+   */
+  createLlm: (config: RepoConfig, job: ReviewJob) => LLMProvider | Promise<LLMProvider>;
 }
 
 export type ReviewJobOutcome =
@@ -49,7 +58,7 @@ export type ReviewJobOutcome =
  * unavailable (for example after a force push).
  */
 export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps): Promise<ReviewJobOutcome> {
-  const scm = deps.createScm(job);
+  const scm = await deps.createScm(job);
 
   const pr = await scm.getPullRequest(job.prNumber);
   if (pr.headSha !== job.headSha) {
@@ -113,7 +122,7 @@ export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps
     scope: `pr #${job.prNumber} @ ${job.headSha}`
   });
 
-  const llm = deps.createLlm(config);
+  const llm = await deps.createLlm(config, job);
   const result = await runReviewPipeline({ context, config, llm, memory: memoryCards });
 
   // Apply team feedback history: suppress what the team has repeatedly
@@ -134,6 +143,17 @@ export async function processReviewJob(job: ReviewJob, deps: ReviewProcessorDeps
     applied = applyFeedback(result.findings, lookup);
   } catch (error) {
     console.warn(`Feedback application failed for PR #${job.prNumber}:`, error instanceof Error ? error.message : error);
+  }
+
+  // A merge conflict is a deterministic, git-level fact from GitHub's
+  // mergeability check, not an LLM judgement. Surface it in the summary and
+  // record it like any other finding. `null` means GitHub is still computing
+  // mergeability, so only a hard `false` is treated as a conflict.
+  if (pr.mergeable === false) {
+    applied.summaryOnly = [
+      { finding: buildMergeConflictFinding(job, pr.mergeableState), reason: "merge conflict" },
+      ...applied.summaryOnly
+    ];
   }
 
   const report = buildReport({
@@ -282,19 +302,51 @@ async function recordPostFailure(
  * input and must not be able to break the worker.
  */
 async function loadHostedConfig(scm: ScmProvider, headSha: string): Promise<RepoConfig> {
+  let parsedYaml: unknown = {};
   try {
     const raw = await scm.getFileContent(DEFAULT_CONFIG_FILE, headSha);
-    if (raw === null) {
-      return RepoConfigSchema.parse({});
+    if (raw !== null) {
+      parsedYaml = parseYaml(raw) ?? {};
     }
-    return RepoConfigSchema.parse(parseYaml(raw) ?? {});
   } catch (error) {
     console.warn(
       `Could not load ${DEFAULT_CONFIG_FILE} at ${headSha}; reviewing with defaults:`,
       error instanceof Error ? error.message : error
     );
-    return RepoConfigSchema.parse({});
+    parsedYaml = {};
   }
+
+  let config: RepoConfig;
+  try {
+    config = RepoConfigSchema.parse(parsedYaml);
+  } catch (error) {
+    console.warn(
+      `Invalid ${DEFAULT_CONFIG_FILE} at ${headSha}; reviewing with defaults:`,
+      error instanceof Error ? error.message : error
+    );
+    config = RepoConfigSchema.parse({});
+    parsedYaml = {};
+  }
+
+  return applyServerProviderDefault(config, parsedYaml);
+}
+
+/**
+ * When a repository does not pin its LLM provider/model in .hubolt.yml, let the
+ * server operator's HUBOLT_LLM_PROVIDER / HUBOLT_LLM_MODEL environment act as
+ * the default for hosted reviews. An explicit provider in the repo's config
+ * still wins, so per-repo choices are preserved.
+ */
+export function applyServerProviderDefault(config: RepoConfig, parsedYaml: unknown): RepoConfig {
+  const repoProviders = (parsedYaml as { providers?: { llm?: unknown; model?: unknown } } | null | undefined)?.providers;
+
+  if (!repoProviders?.llm && process.env.HUBOLT_LLM_PROVIDER) {
+    config.providers.llm = process.env.HUBOLT_LLM_PROVIDER;
+  }
+  if (!repoProviders?.model && process.env.HUBOLT_LLM_MODEL) {
+    config.providers.model = process.env.HUBOLT_LLM_MODEL;
+  }
+  return config;
 }
 
 async function collectMemoryRuleIds(
@@ -411,6 +463,34 @@ async function persistReview(
 
     return review.id;
   });
+}
+
+/**
+ * A deterministic finding for a pull request GitHub reports as not mergeable.
+ * It is summary-only (never line-mapped) and recorded like any other finding so
+ * the conflict shows up in history. The fingerprint is stable per PR so reruns
+ * update rather than duplicate it.
+ */
+function buildMergeConflictFinding(job: ReviewJob, mergeableState?: string): Finding {
+  const stateNote = mergeableState ? ` (mergeable_state: ${mergeableState})` : "";
+  return {
+    fingerprint: `git-merge-conflict-${job.prNumber}`,
+    ruleId: "git.merge-conflict",
+    title: "Merge conflict with the base branch",
+    message:
+      `This pull request does not merge cleanly into \`${job.baseRef}\`${stateNote}. ` +
+      "Rebase or merge the base branch and resolve the conflicts before merging.",
+    category: "bestPractice",
+    severity: "high",
+    confidenceLabel: "high",
+    source: "rule",
+    range: { file: job.baseRef, startLine: 1, endLine: 1, diffSide: "right" },
+    evidence: ["GitHub reports this pull request as not mergeable."],
+    impact: "Merging is blocked until the conflict with the base branch is resolved.",
+    verification: "Re-check the pull request's mergeability after resolving the conflicts.",
+    relatedSignals: [],
+    tags: []
+  };
 }
 
 function dedupeFindingsByFingerprint<T extends { fingerprint: string }>(findings: T[]): T[] {

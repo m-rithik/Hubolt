@@ -72,6 +72,8 @@ export class GitHubScmProvider implements ScmProvider {
     const raw = await this.requestJson<{
       number: number;
       draft?: boolean;
+      mergeable?: boolean | null;
+      mergeable_state?: string;
       head: { sha: string };
       base: { sha: string; ref: string };
     }>("GET", `/repos/${this.repo}/pulls/${prNumber}`);
@@ -81,7 +83,9 @@ export class GitHubScmProvider implements ScmProvider {
       headSha: raw.head.sha,
       baseSha: raw.base.sha,
       baseRef: raw.base.ref,
-      draft: raw.draft ?? false
+      draft: raw.draft ?? false,
+      mergeable: raw.mergeable ?? null,
+      mergeableState: raw.mergeable_state
     };
   }
 

@@ -99,6 +99,47 @@ For local development, `.env` and `.env.*` files are ignored by git. Do not stor
 - **AuditEvents** — audit trail of actions
 - **RateLimitWindows** — request rate limiting per org/provider/model
 
+## GitHub App (automated PR review)
+
+The dashboard's **GitHub Repos** tab lets an admin register repositories; Hubolt
+then reviews every pull request on them (inline comments, a summary, and a
+merge-conflict note) and records the results. Authentication is via a GitHub
+App, so no per-repo token is stored.
+
+### One-time: create the App
+
+Create a GitHub App (Settings -> Developer settings -> GitHub Apps) with:
+
+- **Permissions:** Pull requests: Read & write; Contents: Read-only; Metadata: Read-only.
+- **Subscribe to events:** Pull request (optionally Installation, Installation repositories).
+- **Webhook URL:** `https://<your-server>/webhooks/github`
+- **Webhook secret:** a random string (used below).
+- Generate and download a **private key** (PEM).
+
+### Server environment
+
+Set these for both `hubolt server` and `hubolt worker start`:
+
+```bash
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+GITHUB_APP_SLUG=your-app-slug          # used to build the install link in the UI
+GITHUB_APP_WEBHOOK_SECRET=...          # matches the App's webhook secret
+```
+
+`GITHUB_APP_PRIVATE_KEY` accepts a PEM with literal `\n` escapes (single-line
+env var). Webhook ingest also requires `REDIS_URL`; the worker requires
+`CREDENTIAL_MASTER_KEY` and an LLM provider key as usual. If the App is not
+configured, the worker falls back to `GITHUB_TOKEN`/`GH_TOKEN` for a single
+shared token.
+
+### Use it
+
+1. In the dashboard, open **GitHub Repos** and paste a repo link (e.g.
+   `https://github.com/owner/repo`).
+2. Click **Install GitHub App** and install it on those repos.
+3. Open a pull request; Hubolt posts the review and records it under **Reviews**.
+
 ## Cleanup
 
 Stop the database:

@@ -5,6 +5,7 @@ import { renderOverview } from "./views/overview.js";
 import { renderReviews, renderReviewDetail } from "./views/reviews.js";
 import { renderBudgets } from "./views/budgets.js";
 import { renderGateway } from "./views/gateway.js";
+import { renderGitHubRepos } from "./views/github-repos.js";
 import { renderAudit } from "./views/audit.js";
 import { renderOrganization } from "./views/organization.js";
 
@@ -13,12 +14,13 @@ const ROUTES = [
   { path: "reviews", title: "Reviews", description: "Review history with findings, analyzer signals, and model usage.", render: renderReviews },
   { path: "budgets", title: "Budgets", description: "Provider-level monthly limits and alert thresholds.", render: renderBudgets },
   { path: "gateway", title: "Gateway", description: "LLM credentials, queue state, and routeable model catalog.", render: renderGateway },
+  { path: "repos", title: "GitHub Repos", description: "Registered repositories reviewed automatically on every pull request.", render: renderGitHubRepos },
   { path: "audit", title: "Audit log", description: "Organization actions recorded for operational traceability.", render: renderAudit },
   { path: "organization", title: "Organization", description: "Members, API key metadata, and account identity.", render: renderOrganization }
 ];
 
 const KEYMAP = [
-  ["1-6", "switch view"],
+  ["1-7", "switch view"],
   ["j / k", "move row selection"],
   ["enter", "open selected row"],
   ["/", "focus the filter"],
@@ -229,7 +231,7 @@ document.addEventListener("keydown", (event) => {
 
   if (isTyping()) return;
 
-  if (event.key >= "1" && event.key <= "6") {
+  if (event.key >= "1" && event.key <= "7") {
     const route = ROUTES[Number(event.key) - 1];
     if (route) window.location.hash = `#/${route.path}`;
     return;

@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { ServerContext } from "../app.js";
 import { verifyGitHubSignature } from "../webhooks/signature.js";
-import { classifyWebhookEvent } from "../webhooks/payload.js";
+import { classifyWebhookEvent, classifyInstallationEvent, type InstallationChange } from "../webhooks/payload.js";
 import { ReviewJobProducer } from "../../queue/review-jobs.js";
 
 export interface WebhookRouteOptions {
@@ -62,6 +62,20 @@ export function registerWebhookRoutes(
 
       const eventHeader = request.headers["x-github-event"];
       const eventName = typeof eventHeader === "string" ? eventHeader : undefined;
+
+      // App install/uninstall events keep each registered repo's install status
+      // current so the dashboard reflects reality before the first pull request.
+      const installationChange = classifyInstallationEvent(eventName, body);
+      if (installationChange) {
+        try {
+          await applyInstallationChange(context.db, installationChange);
+        } catch (error) {
+          request.log.warn({ err: error }, "failed to apply installation change");
+        }
+        reply.status(202).send({ processed: true, reason: "installation updated" } satisfies WebhookResponse);
+        return;
+      }
+
       const classification = classifyWebhookEvent(eventName, body);
 
       if (classification.kind === "invalid") {
@@ -78,7 +92,7 @@ export function registerWebhookRoutes(
 
       try {
         const repos = await context.db.repository.findMany({
-          where: { fullName: event.repository.full_name },
+          where: { fullName: event.repository.full_name, disabledAt: null },
           select: { id: true, orgId: true },
           take: 2
         });
@@ -105,6 +119,21 @@ export function registerWebhookRoutes(
 
         const repo = repos[0];
         const deliveryHeader = request.headers["x-github-delivery"];
+        const installationId = event.installation ? String(event.installation.id) : undefined;
+
+        // Remember which installation grants access to this repo so the
+        // dashboard can show install status and the worker can mint a token.
+        // Best-effort: a failed update must not block enqueueing the review.
+        if (installationId) {
+          try {
+            await context.db.repository.update({
+              where: { id: repo.id },
+              data: { installationId }
+            });
+          } catch (error) {
+            request.log.warn({ err: error, repoId: repo.id }, "failed to persist installation id");
+          }
+        }
 
         const { jobId, created } = await options.producer.enqueue({
           orgId: repo.orgId,
@@ -115,7 +144,8 @@ export function registerWebhookRoutes(
           baseSha: event.pull_request.base.sha,
           baseRef: event.pull_request.base.ref,
           action: event.action,
-          deliveryId: typeof deliveryHeader === "string" ? deliveryHeader : undefined
+          deliveryId: typeof deliveryHeader === "string" ? deliveryHeader : undefined,
+          installationId
         });
 
         reply.status(202).send({ processed: true, jobId, queued: created } satisfies WebhookResponse);
@@ -125,4 +155,26 @@ export function registerWebhookRoutes(
       }
     });
   });
+}
+
+/**
+ * Reflect an App install/uninstall onto registered repos. Matching is by full
+ * name (the installation grants access regardless of which Hubolt org
+ * registered the repo); unlinking is scoped to the same installation so a
+ * removal cannot clear a repo wired to a different installation.
+ */
+async function applyInstallationChange(db: ServerContext["db"], change: InstallationChange): Promise<void> {
+  if (change.linked.length > 0) {
+    await db.repository.updateMany({
+      where: { fullName: { in: change.linked } },
+      data: { installationId: change.installationId }
+    });
+  }
+
+  if (change.unlinked.length > 0) {
+    await db.repository.updateMany({
+      where: { fullName: { in: change.unlinked }, installationId: change.installationId },
+      data: { installationId: null }
+    });
+  }
 }

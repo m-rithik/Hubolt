@@ -154,7 +154,9 @@ describe("webhook route", () => {
     const producer = { enqueue, close: vi.fn() } as unknown as ReviewJobProducer;
     const db: any = {
       repository: {
-        findMany: vi.fn(async () => repos)
+        findMany: vi.fn(async () => repos),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 }))
       }
     };
 
@@ -210,6 +212,23 @@ describe("webhook route", () => {
     await app.close();
   });
 
+  test("captures the App installation id from the payload onto the job and repo", async () => {
+    const { app, enqueue, db } = buildApp([{ id: "repo_1", orgId: "org_1" }]);
+    const body = Buffer.from(JSON.stringify(pullRequestPayload({ installation: { id: 4242 } })));
+
+    const response = await inject(app, body, {
+      "x-github-event": "pull_request",
+      "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ installationId: "4242" }));
+    expect(db.repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "repo_1" }, data: { installationId: "4242" } })
+    );
+    await app.close();
+  });
+
   test("acknowledges but skips unregistered repositories", async () => {
     const { app, enqueue } = buildApp([]);
     const body = Buffer.from(JSON.stringify(pullRequestPayload()));
@@ -240,6 +259,58 @@ describe("webhook route", () => {
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({ processed: false, reason: "repository registration is ambiguous" });
     expect(enqueue).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("marks repos installed from an installation_repositories event without enqueueing", async () => {
+    const { app, enqueue, db } = buildApp([{ id: "repo_1", orgId: "org_1" }]);
+    const body = Buffer.from(
+      JSON.stringify({
+        action: "added",
+        installation: { id: 4242 },
+        repositories_added: [{ full_name: "owner/repo" }]
+      })
+    );
+
+    const response = await inject(app, body, {
+      "x-github-event": "installation_repositories",
+      "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ processed: true, reason: "installation updated" });
+    expect(db.repository.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { fullName: { in: ["owner/repo"] } },
+        data: { installationId: "4242" }
+      })
+    );
+    expect(enqueue).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("clears install status when the app is removed from a repo", async () => {
+    const { app, db } = buildApp([{ id: "repo_1", orgId: "org_1" }]);
+    const body = Buffer.from(
+      JSON.stringify({
+        action: "removed",
+        installation: { id: 4242 },
+        repositories_removed: [{ full_name: "owner/repo" }]
+      })
+    );
+
+    const response = await inject(app, body, {
+      "x-github-event": "installation_repositories",
+      "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(db.repository.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { fullName: { in: ["owner/repo"] }, installationId: "4242" },
+        data: { installationId: null }
+      })
+    );
     await app.close();
   });
 

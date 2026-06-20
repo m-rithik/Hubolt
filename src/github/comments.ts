@@ -53,18 +53,18 @@ export function findSummaryComment(comments: IssueComment[]): IssueComment | und
 export function buildInlineCommentBody(finding: Finding, suggestionBlock: string | null): string {
   const lines: string[] = [];
 
-  lines.push(`**${finding.title}** (${finding.severity}, ${finding.category})`);
+  lines.push(`**${finding.title}**  \`${finding.severity}\` · ${finding.category}`);
   lines.push("");
   lines.push(finding.message);
 
   if (finding.impact) {
     lines.push("");
-    lines.push(`Impact: ${finding.impact}`);
+    lines.push(`**Impact:** ${finding.impact}`);
   }
 
   if (finding.verification) {
     lines.push("");
-    lines.push(`Verify: ${finding.verification}`);
+    lines.push(`**Verify:** ${finding.verification}`);
   }
 
   if (suggestionBlock) {
@@ -72,7 +72,7 @@ export function buildInlineCommentBody(finding: Finding, suggestionBlock: string
     lines.push(suggestionBlock);
   } else if (finding.suggestion) {
     lines.push("");
-    lines.push(`Suggestion: ${finding.suggestion}`);
+    lines.push(`**Suggestion:** ${finding.suggestion}`);
   }
 
   lines.push("");
@@ -97,28 +97,39 @@ export function buildSummaryBody(
 ): string {
   const lines: string[] = [];
   lines.push(SUMMARY_MARKER);
-  lines.push("## Hubolt Review");
+  lines.push("## Hubolt review");
   lines.push("");
 
   const total = report.findings.length;
+  const worst = worstSeverity([...report.findings, ...summaryOnly.map((entry) => entry.finding)]);
+
+  let headline: string;
   if (total === 0) {
-    if (summaryOnly.length === 0) {
-      lines.push("No findings at or above the configured threshold.");
-    } else {
-      lines.push(`${summaryOnly.length} finding(s) moved to the summary; none posted inline.`);
-    }
+    headline =
+      summaryOnly.length === 0
+        ? "No findings at or above the configured threshold."
+        : `${summaryOnly.length} finding(s) moved to the summary; none posted inline.`;
   } else {
     const counts = SEVERITY_ORDER.map(
-      (severity) => `${severity}: ${report.summary.bySeverity[severity]}`
-    ).join(" | ");
-    lines.push(`${total} finding(s) - ${counts}`);
+      (severity) => `**${severity}** ${report.summary.bySeverity[severity]}`
+    ).join(" · ");
+    headline = `**${total} finding(s)** · ${counts}`;
+  }
+
+  // GitHub alerts are the only native way to color a comment: CAUTION renders
+  // red, WARNING amber, NOTE blue, TIP green. Pick by the worst severity so the
+  // headline's color tracks how bad the review is.
+  lines.push(`> [!${alertType(worst)}]`);
+  lines.push(`> ${headline}`);
+
+  if (total > 0) {
     lines.push("");
     lines.push("| Severity | Location | Finding |");
-    lines.push("|---|---|---|");
+    lines.push("|:--|:--|:--|");
     const sorted = sortBySeverity(report.findings);
     for (const finding of sorted.slice(0, MAX_SUMMARY_ROWS)) {
       const location = `${finding.range.file}:${finding.range.startLine}`;
-      lines.push(`| ${finding.severity} | ${escapeTableCell(location)} | ${escapeTableCell(finding.title)} |`);
+      lines.push(`| \`${finding.severity}\` | \`${escapeTableCell(location)}\` | **${escapeTableCell(finding.title)}** |`);
     }
     if (sorted.length > MAX_SUMMARY_ROWS) {
       lines.push("");
@@ -128,25 +139,53 @@ export function buildSummaryBody(
 
   if (summaryOnly.length > 0) {
     lines.push("");
-    lines.push("### Not shown inline");
+    lines.push(`### Not shown inline (${summaryOnly.length})`);
     lines.push("");
+    lines.push("| Location | Finding | Reason |");
+    lines.push("|:--|:--|:--|");
     for (const entry of summaryOnly.slice(0, MAX_SUMMARY_ROWS)) {
       const location = `${entry.finding.range.file}:${entry.finding.range.startLine}`;
-      lines.push(`- ${escapeTableCell(location)} - ${escapeTableCell(entry.finding.title)} (${entry.reason})`);
+      lines.push(
+        `| \`${escapeTableCell(location)}\` | ${escapeTableCell(entry.finding.title)} | ${escapeTableCell(entry.reason)} |`
+      );
     }
     if (summaryOnly.length > MAX_SUMMARY_ROWS) {
-      lines.push(`- And ${summaryOnly.length - MAX_SUMMARY_ROWS} more.`);
+      lines.push(`| | And ${summaryOnly.length - MAX_SUMMARY_ROWS} more | |`);
     }
   }
 
   lines.push("");
-  lines.push(`Reviewed at head ${headSha}.`);
+  lines.push(`<sub>Reviewed at head \`${headSha}\`</sub>`);
 
   const body = lines.join("\n");
   if (body.length <= MAX_SUMMARY_CHARS) {
     return body;
   }
   return `${body.slice(0, MAX_SUMMARY_CHARS)}\n\nTruncated to fit the comment size limit.`;
+}
+
+// GitHub alert type per severity. CAUTION=red, WARNING=amber, NOTE=blue.
+const ALERT_BY_SEVERITY: Record<Severity, string> = {
+  critical: "CAUTION",
+  high: "CAUTION",
+  medium: "WARNING",
+  low: "NOTE",
+  info: "NOTE"
+};
+
+/** Highest severity present among the findings, or null when there are none. */
+function worstSeverity(findings: Finding[]): Severity | null {
+  for (const severity of SEVERITY_ORDER) {
+    if (findings.some((finding) => finding.severity === severity)) {
+      return severity;
+    }
+  }
+  return null;
+}
+
+/** Alert type for a severity; TIP (green) when nothing was found. */
+function alertType(severity: Severity | null): string {
+  return severity ? ALERT_BY_SEVERITY[severity] : "TIP";
 }
 
 function sortBySeverity(findings: Finding[]): Finding[] {

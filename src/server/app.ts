@@ -12,6 +12,7 @@ import { registerRateLimitRoutes } from "./routes/rate-limits.js";
 import { registerFeedbackRoutes } from "./routes/feedback.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerGatewayRoutes } from "./routes/gateway.js";
+import { registerGitHubRepoRoutes } from "./routes/github-repos.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -58,6 +59,7 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
   registerRateLimitRoutes(fastify, context);
   registerFeedbackRoutes(fastify, context);
   registerMemoryRoutes(fastify, context);
+  registerGitHubRepoRoutes(fastify, context);
 
   let gateway: LLMGateway | null = null;
   if (context.redis) {
@@ -81,7 +83,9 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
     });
   }
 
-  const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  // The GitHub App delivers webhooks signed with its own secret; accept that or
+  // the standalone secret used by a manually configured repo webhook.
+  const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET || process.env.GITHUB_APP_WEBHOOK_SECRET;
   if (webhookSecret && context.redis) {
     const producer = createReviewJobProducer(context.redis);
     registerWebhookRoutes(fastify, context, { secret: webhookSecret, producer });
@@ -90,7 +94,7 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
     });
     console.log("GitHub webhook ingest enabled");
   } else if (webhookSecret) {
-    console.warn("GITHUB_WEBHOOK_SECRET is set but Redis is unavailable; webhook ingest disabled");
+    console.warn("A GitHub webhook secret is set but Redis is unavailable; webhook ingest disabled");
   }
 
   return fastify;

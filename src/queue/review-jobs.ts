@@ -13,7 +13,12 @@ export const ReviewJobSchema = z.object({
   baseSha: z.string().min(1),
   baseRef: z.string().min(1),
   action: z.string().min(1),
-  deliveryId: z.string().optional()
+  deliveryId: z.string().optional(),
+  /**
+   * GitHub App installation id that grants access to this repo. Present when
+   * the App delivered the webhook; absent for the env-token fallback path.
+   */
+  installationId: z.string().optional()
 });
 export type ReviewJob = z.infer<typeof ReviewJobSchema>;
 

@@ -12,7 +12,7 @@ class GitHubCommentManager {
   async findExistingComment() {
     try {
       const comments = await this.getAllComments();
-      return comments.find((c) => c.body.includes(COMMENT_MARKER));
+      return comments.find((c) => c.body?.includes(COMMENT_MARKER));
     } catch (error) {
       console.error("Error finding existing comment:", error.message);
       throw error;
@@ -102,23 +102,6 @@ class GitHubCommentManager {
   }
 }
 
-function sanitizeCacheKey(ref) {
-  return ref
-    .replace(/\//g, "-")
-    .replace(/[^a-zA-Z0-9._\-]/g, "_")
-    .substring(0, 200);
-}
-
-function validateGitRef(ref) {
-  if (!ref || typeof ref !== "string") {
-    throw new Error("Invalid git ref: must be non-empty string");
-  }
-  if (ref.includes("..") || ref.includes("\\") || ref.includes("$")) {
-    throw new Error("Invalid git ref: contains dangerous characters");
-  }
-  return true;
-}
-
 function exponentialBackoff(baseDelayMs, maxAttempts) {
   return async (fn) => {
     let lastError;
@@ -146,8 +129,6 @@ function exponentialBackoff(baseDelayMs, maxAttempts) {
 
 module.exports = {
   GitHubCommentManager,
-  sanitizeCacheKey,
-  validateGitRef,
   exponentialBackoff,
   COMMENT_MARKER
 };

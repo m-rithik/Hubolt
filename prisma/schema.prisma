@@ -14,6 +14,12 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // LLM the hosted review worker uses for this org. The provider names a
+  // gateway-stored credential (provider_credentials); null falls back to the
+  // repo config / server env. The model is free-form for the chosen provider.
+  reviewLlmProvider String?
+  reviewLlmModel    String?
+
   repos               Repository[]
   members             OrganizationMember[]
   budgets             Budget[]
@@ -139,6 +145,16 @@ model Repository {
   fullName String
   url      String
 
+  // GitHub App installation that grants access to this repo. Null when the
+  // repo is registered but the App is not installed (or no PR has been seen
+  // yet); the worker mints an installation token from this id to post reviews.
+  installationId String?
+
+  // Set when the repo is removed from the dashboard. Soft-disable preserves the
+  // repo's reviews/findings (a hard delete would cascade them away); disabled
+  // repos are skipped by the webhook and hidden from the active list.
+  disabledAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -148,6 +164,7 @@ model Repository {
 
   @@unique([orgId, fullName])
   @@index([fullName])
+  @@index([installationId])
   @@map("repositories")
 }
 

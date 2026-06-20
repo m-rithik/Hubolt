@@ -1352,3 +1352,89 @@ tbody tr:hover td {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* GitHub repo manager */
+.repo-add { max-width: 760px; }
+
+.repo-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.repo-add-input {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 10px 11px;
+  color: var(--paper);
+  background: rgba(1, 7, 36, 0.54);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.repo-add-input::placeholder { color: var(--faint); }
+.repo-add-input:hover { border-color: rgba(111, 244, 255, 0.32); }
+
+.repo-add-input:focus {
+  outline: 0;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(111, 244, 255, 0.18), 0 18px 44px rgba(0, 91, 255, 0.18);
+  background: rgba(1, 7, 36, 0.86);
+}
+
+.repo-add-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.repo-add-hint { font-size: 11px; }
+
+.repo-install {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 760px;
+  padding: 13px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  background: rgba(12, 76, 176, 0.14);
+}
+
+.repo-install-title { font-weight: 600; }
+.repo-install-desc { font-size: 12px; margin-top: 2px; }
+
+.repo-install-btn {
+  flex: none;
+  padding: 0 16px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--green);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  transition: filter 140ms ease, box-shadow 140ms ease;
+}
+
+.repo-install-btn:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 0 0 3px rgba(111, 244, 255, 0.18);
+}
+
+.repo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}

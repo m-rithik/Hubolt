@@ -92,5 +92,15 @@ export const api = {
   configureCredential: (provider, apiKey) =>
     request("/gateway/credentials", { method: "POST", body: { provider, apiKey } }),
   removeCredential: (provider) =>
-    request(`/gateway/credentials/${encodeURIComponent(provider)}`, { method: "DELETE" })
+    request(`/gateway/credentials/${encodeURIComponent(provider)}`, { method: "DELETE" }),
+
+  repos: () => request("/github-repos"),
+  createRepo: (body) => request("/github-repos", { method: "POST", body }),
+  deleteRepo: (fullName) => {
+    const [owner, repo] = fullName.split("/");
+    return request(`/github-repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { method: "DELETE" });
+  },
+  reviewModel: () => request("/github-repos/review-model"),
+  setReviewModel: (body) => request("/github-repos/review-model", { method: "PUT", body }),
+  reviewStatus: () => request("/github-repos/status")
 };

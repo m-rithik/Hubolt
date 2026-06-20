@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    name: Typecheck, test, migration drift
+    runs-on: ubuntu-latest
+
+    services:
+      # Throwaway database for the migration drift check; `prisma migrate diff
+      # --from-migrations` replays the tracked migrations into it.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hubolt
+          POSTGRES_PASSWORD: hubolt_ci
+          POSTGRES_DB: hubolt_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hubolt -d hubolt_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://hubolt:hubolt_ci@localhost:5432/hubolt_ci
+      SHADOW_DATABASE_URL: postgresql://hubolt:hubolt_ci@localhost:5432/hubolt_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Reports when prisma/migrations no longer reproduces schema.prisma,
+      # catching a schema change committed without a migration. Non-blocking
+      # for now: the repo has pre-existing drift (foreign-key representation
+      # differences and the gateway_logs index/PK rename) that must be
+      # reconciled with a follow-up migration before this gate can be made
+      # blocking by removing continue-on-error.
+      - run: npm run db:check-drift
+        continue-on-error: true
