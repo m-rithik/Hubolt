@@ -1,0 +1,34 @@
+# systemd unit for the Hubolt server (no Docker).
+# Install:
+#   sudo cp /opt/hubolt/deploy/hubolt-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hubolt-server
+
+[Unit]
+Description=Hubolt server
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=hubolt
+Group=hubolt
+WorkingDirectory=/opt/hubolt
+# dotenv reads .env from WorkingDirectory at startup, so all secrets come from
+# /opt/hubolt/.env. The few non-secret runtime values are set below.
+ExecStart=/usr/bin/node dist/server/index.js
+Restart=on-failure
+RestartSec=5
+
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+Environment=HUBOLT_CACHE_DIR=/opt/hubolt/.cache
+
+# Modest hardening that does not interfere with the app's own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=true
+
+[Install]
+WantedBy=multi-user.target

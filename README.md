@@ -1,430 +1,287 @@
-# Hubolt - Context-Aware AI Code Review Assistant
+<div align="center">
 
-Hubolt is a local-first, not local-only, AI code review assistant designed to produce high-signal pull request reviews. It combines codebase context, static analyzer evidence, and LLM reasoning so developers can start locally while teams can grow into shared middleware, logs, webhooks, and integrations.
+# Hubolt
 
-The project is built around one idea: an AI reviewer is only valuable if it understands enough context to be trusted.
+**Context-aware AI code review that is local-first, not local-only.**
+
+Hubolt reviews your git changes by combining static-analyzer evidence with an LLM,
+then produces ranked, evidence-based findings.
+Run it as a CLI for yourself, or as a self-hostable server for your team.
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/m-rithik/Hubolt)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20.19-339933.svg?logo=node.js&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-ESM-3178C6.svg?logo=typescript&logoColor=white)](tsconfig.json)
+[![Stars](https://img.shields.io/github/stars/m-rithik/hubolt?style=social)](https://github.com/m-rithik/hubolt/stargazers)
+
+
+
+[Documentation](docs/index.md) &nbsp;·&nbsp;
+[Getting Started](docs/getting-started.md) &nbsp;·&nbsp;
+[Hosted server](#hosted-team-server) &nbsp;·&nbsp;
+[Features](docs/features.md) &nbsp;·&nbsp;
+[API](docs/api.md) &nbsp;·&nbsp;
+[Deployment](docs/deployment.md)
+
+</div>
+
+---
 
 ## Why Hubolt
 
-Most AI review tools can comment on a diff. That is no longer enough. Diff-only review often misses upstream validation, shared type contracts, repository conventions, and cross-file effects. The result is noise: shallow suggestions, repeated comments, and feedback that developers eventually ignore.
+Most AI review tools comment on a raw diff. That misses upstream validation, shared
+type contracts, repository conventions, and cross-file effects, so the output is
+noisy and developers learn to ignore it. Hubolt builds real context before it
+reviews, and stays quiet when there is nothing worth saying.
 
-Hubolt is planned around a sharper review model:
+**What makes it different**
 
-- Context-aware review that includes changed files, semantic regions, and related snippets.
-- Analyzer-backed findings from tools such as TypeScript, ESLint, Semgrep, and secret scanning.
-- Evidence-based comments that explain why a finding matters and how to verify the fix.
-- Local-first operation for developers and privacy-sensitive repositories.
-- Low-noise review modes, comment budgets, severity thresholds, and persistent dedupe.
-- Safe fix suggestions through GitHub suggestion blocks and draft patches, not silent auto-edits.
+- **Context-aware, not diff-only.** Pulls in changed files, semantic regions
+  (tree-sitter), and analyzer signals before calling the model.
+- **Evidence over opinions.** Each finding explains what, why it matters, and how
+  to verify the fix, with a severity and confidence.
+- **Low noise by design.** Comment budgets, severity thresholds, ranking, and
+  dedupe keep reviews short and signal-heavy.
+- **Local-first, not local-only.** Start as a single-developer CLI; grow into a
+  shared team server without changing the review core.
+- **Safe by default.** Reviewed code is treated as untrusted input, secrets are
+  redacted before prompts, and fixes are suggested for human review, never applied
+  silently.
 
-## Core Features
+**Who it's for**
 
-- Local CLI review for staged changes, working tree diffs, and pull request branches.
-- GitHub Action review for pull requests using the same core pipeline as the CLI.
-- Self-hostable team middleware for shared review history, audit logs, budgets, and model routing.
-- PR summary and walkthrough with changed areas, risk score, and top findings.
-- Inline review comments with range-aware file locations.
-- GitHub suggestion blocks for small, safe, single-location fixes.
-- Markdown and JSON report artifacts for CI and local use.
-- Repository configuration through `.hubolt.yml`.
-- Natural-language custom rules for team-specific standards.
-- Typed integration events from the first build so future adapters do not change the core pipeline.
-- Local memory logs and compact review summaries for context without replaying full history.
-- LLM provider support for OpenAI first, then Claude, Gemini, and Ollama.
-- Hosted LLM gateway roadmap so teams can rely on one Hubolt API for model routing, audit logs, budgets, and shared review memory.
-- Hosted tier roadmap for review history, feedback learning, dashboards, RBAC, and external integrations.
+| You are... | Use Hubolt as... |
+|------------|------------------|
+| An individual developer | A pre-commit / pre-PR CLI (`review --staged`). |
+| An OSS maintainer | A GitHub Action that comments on pull requests. |
+| A team / org | A self-hosted server with shared history, budgets, audit logs, and a single gateway key. |
 
-## Local-First, Not Local-Only
+## How it works
 
-Hubolt starts as a fast local reviewer, then scales into team infrastructure without changing the review core.
+```text
+ git changes ──▶ context (tree-sitter) ──▶ analyzers ──▶ LLM ──▶ rank + dedupe ──▶ findings
+                                                                                     │
+                                          reports · GitHub PR comments · team server ◀┘
+```
 
-| Lane | Who it is for | What it provides |
+1. Collect the diff (staged, working tree, a file, or a `--base`/`--head` range).
+2. Build context: changed files, semantic regions, and related snippets.
+3. Run static analyzers (TypeScript, ESLint, semgrep, secret/dependency scans).
+4. Call the configured LLM provider and validate structured findings.
+5. Rank, dedupe, and filter to a comment budget.
+6. Emit reports, PR comments, or push to a team server.
+
+## Local vs hosted
+
+Both lanes share the same review core. Start local, grow into the hosted server
+when your team needs shared history and governance - nothing about the review
+itself changes.
+
+| | Local / CLI | Hosted / Team server |
 |---|---|---|
-| Local and CI | Individual developers, OSS projects, privacy-sensitive repos, and fast pre-PR checks. | `hubolt review --staged`, security mode, local JSON/Markdown reports, redacted `.hubolt/` logs, and optional local-model review. |
-| Team middleware | Teams that need shared history, governance, auditability, and integrations. | Self-hosted API, Postgres review history, hosted LLM gateway, org budgets, webhooks, PR comments, feedback learning, and Slack/Jira-style integrations. |
+| **Run as** | CLI or GitHub Action | self-hosted Fastify server |
+| **Storage** | local `.hubolt/` (event log + cache) | PostgreSQL |
+| **Needs Postgres/Redis** | No | Postgres required; Redis for gateway + queue |
+| **Provider keys** | each user / CI sets their own | one gateway key; credentials stored encrypted |
+| **Review history** | local report files | shared history, trends, audit log |
+| **GitHub bot** | Action or `github post` with a token | GitHub App webhooks processed by a worker |
+| **Governance** | config thresholds + comment budget | per-provider budgets, rate limits, model routing, admin/viewer keys |
+| **Extras** | Markdown / JSON reports | web control panel at `/ui`, Slack / Teams / Jira / ClickUp / Asana |
+| **Best for** | individuals, OSS, privacy-sensitive repos | teams needing shared, auditable review |
 
-Local mode does not require a Hubolt server. Team mode adds centralized logs and workflow automation when a team is ready for it.
+### The GitHub bot, in both lanes
 
-## Architecture
+- **Local / CI:** the GitHub Action (or `hubolt github post`) runs the review on a
+  pull request and posts the summary, inline comments, and suggestion blocks using
+  a `GITHUB_TOKEN`. No server required.
+- **Hosted:** a GitHub App sends webhooks to `POST /webhooks/github`; the server
+  queues each event and a background `worker` runs the review and comments back.
+  This gives one install across many repos, plus shared history and budgets.
 
-Hubolt uses one shared review core across every deployment path.
+See [Hosted (team server)](#hosted-team-server) for setup, or
+[Deployment](docs/deployment.md) for the full GitHub App walkthrough.
 
-```text
-Local CLI or GitHub Action
-        |
-        v
-Review context builder
-        |
-        v
-Core review pipeline
-  - load changed files
-  - build semantic context
-  - run analyzer legos
-  - call LLM provider
-  - validate structured findings
-  - rank, dedupe, and filter noise
-        |
-        v
-Typed review events
-        |
-        v
-Reports, PR comments, suggestion blocks, or hosted storage
-```
+## Features at a glance
 
-The core pipeline is provider-agnostic. LLMs, analyzers, source control providers, storage backends, event sinks, notification providers, issue trackers, and report renderers are adapters around the same typed review model.
+| | |
+|---|---|
+| **Review modes** | Local CLI review, security-focused mode, analyzers-only (no LLM). |
+| **LLM providers** | OpenAI, Anthropic (Claude), Google (Gemini). |
+| **Output** | Markdown / JSON reports; GitHub PR comments and suggestion blocks. |
+| **Team server** | REST API, web control panel (`/ui`), review history, audit logs, budgets, rate limits, LLM gateway. |
+| **Config** | Repository rules via `.hubolt.yml`. |
+| **Integrations** | Slack, Teams, Jira, ClickUp, Asana. |
 
-## Deployment Tiers
+### A closer look
 
-### Stateless Tier
+- **Review modes** - `review` for general feedback, `security` to fail on
+  high-severity issues, `analyze` for analyzer-only runs that need no API key.
+- **CI gating** - `--ci --fail-on <severity>` exits non-zero so a pull request
+  can block on findings; `--json` / `--md` write report artifacts.
+- **Memory** - a local event log plus compact team memory cards give the reviewer
+  context without replaying full history into every prompt.
+- **Governance (server)** - per-provider budgets, rate limits, model routing, and
+  an audit trail of prompt version, model, tokens, and cost.
+- **Control panel** - a built-in web UI at `/ui` for browsing reviews and config.
 
-The stateless tier is for individuals, open source projects, CI workflows, and privacy-sensitive repositories.
-
-- Runs as a CLI or GitHub Action.
-- Sends code directly from the runner to the configured model provider.
-- Stores no hosted history.
-- Can write local JSON and Markdown reports.
-- Can use local models through Ollama when configured.
-
-### Team Middleware Tier
-
-The team middleware tier is planned for teams that need centralized review history, governance, audit logs, and workflow automation.
-
-- Receives repository webhooks.
-- Processes reviews through queued workers.
-- Stores reviews, findings, feedback, and audit events.
-- Learns from accepted and dismissed feedback.
-- Acts as an optional LLM gateway so teams can use one Hubolt API key instead of distributing model-provider keys across every repository.
-- Enforces org budgets, provider routing, rate limits, redaction, prompt versions, and model audit trails.
-- Supports dashboards, RBAC, org memory, and trend reports.
-
-Both lanes use the same core review pipeline.
-
-## Planned Quickstart
-
-Hubolt is currently in the planning and implementation stage. The intended developer workflow is:
-
-```bash
-npm install -g @m-rithik/hubolt
-hubolt setup
-hubolt review --staged
-hubolt review --json hubolt.report.json --md hubolt.report.md
-```
-
-For GitHub Actions:
-
-```yaml
-name: Hubolt Review
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: m-rithik/hubolt/.github/actions/hubolt@main
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-```
-
-## CLI Commands Quick Reference
-
-### Review Commands
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `hubolt review` | Review all working-tree changes | `hubolt review` |
-| `hubolt review --staged` | Review staged changes only | `hubolt review --staged` |
-| `hubolt review [file]` | Review a specific file | `hubolt review src/app.ts` |
-| `hubolt review --base HEAD~1 --head HEAD` | Review commit range | `hubolt review --base main --head feature` |
-| `hubolt review mode` | Select and save review mode | `hubolt review mode` |
-| `hubolt security` | Security-focused review (fails on high) | `hubolt security` |
-| `hubolt security --fail-on critical` | Security review with custom severity | `hubolt security --fail-on critical` |
-| `hubolt analyze` | Analyzers only, no LLM | `hubolt analyze --no-cache` |
-
-### Common Options
-
-| Option | Purpose | Example |
-|--------|---------|---------|
-| `--provider <name>` | Override LLM provider | `hubolt review --provider openai` |
-| `--model <model>` | Override model | `hubolt review --model gpt-4` |
-| `--no-llm` | Skip LLM, analyzers only | `hubolt review --no-llm` |
-| `--no-cache` | Disable result caching | `hubolt review --no-cache` |
-| `--json <path>` | Write JSON report | `hubolt review --json report.json` |
-| `--md <path>` | Write Markdown report | `hubolt review --md report.md` |
-| `--ci` | CI mode (deterministic + exit codes) | `hubolt review --ci --fail-on high` |
-| `--fail-on <severity>` | Exit code gate | `hubolt security --fail-on medium` |
-| `--config <path>` | Custom config file | `hubolt review --config .hubolt.prod.yml` |
-
-### Setup & Configuration
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `hubolt setup` | Configure LLM provider | `hubolt setup` |
-| `hubolt setup --print` | Print sample config | `hubolt setup --print > .hubolt.yml` |
-| `hubolt setup --use-existing-keys` | Keep existing provider keys during setup | `hubolt setup --use-existing-keys` |
-| `hubolt setup --rewrite-keys` | Replace existing provider keys during setup | `hubolt setup --rewrite-keys` |
-| `hubolt config validate` | Validate config & credentials | `hubolt config validate` |
-| `hubolt config show` | Display current config | `hubolt config show` |
-
-### Server Commands (Team Mode)
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `hubolt server` | Start team review server | `hubolt server --port 3000` |
-| `hubolt server bootstrap` | Create org & API key | `hubolt server bootstrap --org myteam --email admin@team.com` |
-| `hubolt push-report` | Push review to server | `hubolt push-report --report r.json --api-key $KEY` |
-
-### Utility Commands
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `hubolt cache` | Show cache status | `hubolt cache` |
-| `hubolt cache clear` | Clear cache | `hubolt cache clear` |
-| `hubolt logs tail` | View recent events | `hubolt logs tail` |
-| `hubolt logs inspect` | Summarize event log | `hubolt logs inspect` |
-| `hubolt providers list` | List configured providers | `hubolt providers list` |
-| `hubolt eval` | Run evaluation harness | `hubolt eval --suite cwe` |
-
-### Global Options
-
-| Option | Purpose |
-|--------|---------|
-| `--help` | Show command help |
-| `--version` | Show version |
-
-### Common Workflows
-
-**Local Development:**
-```bash
-hubolt setup                              # One-time setup
-hubolt review --staged                    # Review before commit
-hubolt review --json report.json --md r.md # Generate reports
-hubolt logs tail                          # View analysis events
-```
-
-**CI/CD Gates:**
-```bash
-hubolt security --ci --fail-on high       # Fail if high severity found
-hubolt review --ci --fail-on critical     # General review gate
-```
-
-**Team Server:**
-```bash
-docker-compose up -d                      # Start PostgreSQL
-npx prisma migrate deploy                 # Run migrations
-hubolt server --port 3000                 # Start server
-hubolt push-report --report r.json        # Push to server
-```
-
-See [CLI_COMMANDS.md](docs/CLI_COMMANDS.md) for detailed documentation of all commands.
-
-## Configuration Preview
-
-Hubolt is configured with repository rules plus machine-level secrets.
-
-```yaml
-# .hubolt.yml
-mode: balanced
-severityThreshold: medium
-failOnSeverity: critical
-commentBudget: 8
-maxFileSizeKb: 256
-
-providers:
-  llm: openai
-  model: gpt-4o-mini
-
-privacy:
-  redactSecrets: true
-  showContextSentToModel: true
-  allowExternalModels: true
-
-analyzers:
-  typescript: true
-  eslint: true
-  semgrep: true
-  secrets: true
-
-memory:
-  localEventLog: true
-  summarizeAfterEvents: 50
-  maxPromptMemoryTokens: 2500
-  retrieval: lexical
-
-behaviorPacks:
-  - reviewer-discipline
-
-integrations:
-  events: true
-  github: true
-  slack: false
-  jira: false
-
-ignore:
-  - dist/**
-  - build/**
-  - coverage/**
-  - "**/*.test.ts"
-
-knowledgeFiles:
-  - README.md
-  - .github/copilot-instructions.md
-  - .hubolt/context.md
-
-rules:
-  - "API handlers must validate request bodies with zod before using them."
-  - "React components should avoid unnecessary derived state."
-  - "Database reads that can return large collections must include pagination or explicit limits."
-```
-
-Machine secrets stay outside the repository:
-
-```bash
-OPENAI_API_KEY=...
-HUBOLT_LLM_PROVIDER=openai
-HUBOLT_LLM_MODEL=gpt-4o-mini
-HUBOLT_REVIEW_CONCURRENCY=4
-```
-
-## Example Finding
+### Example finding (illustrative)
 
 ```text
-File: src/api/users.ts
-Range: lines 24-27
-Severity: medium
-Confidence: high
-Category: performance
-Source: llm+analyzer
+File:       src/api/users.ts   (lines 24-27)
+Severity:   medium      Confidence: high      Category: performance
 
-Title:
-Unbounded user query can load the entire collection.
-
-Evidence:
-The changed handler calls User.find() without a limit, cursor, or pagination guard.
-The route returns the result directly to the client.
-
-Impact:
-Large datasets can increase memory use, slow the endpoint, and make the API harder to operate under load.
-
-Suggested fix:
-Add limit and offset validation, then pass those values into the query.
-
-Verification:
-Add or update a request test that verifies the endpoint applies the default limit and respects a valid page parameter.
+Title:      Unbounded user query can load the entire collection.
+Evidence:   The handler calls User.find() with no limit, cursor, or pagination
+            guard and returns the result directly to the client.
+Impact:     Large datasets increase memory use and slow the endpoint under load.
+Fix:        Validate limit/offset and pass them into the query.
+Verify:     Add a request test asserting the default limit and a valid page param.
 ```
 
-For small single-location fixes, Hubolt will prefer GitHub suggestion blocks:
+For small, single-location fixes Hubolt prefers a GitHub suggestion block:
 
+````text
 ```suggestion
 const users = await User.find().limit(limit).skip(offset);
 ```
+````
 
-## Memory and Behavior
+## Quick start (local)
 
-Hubolt should not paste an entire past conversation or review history into every prompt. That would be noisy, expensive, and rate-limit heavy. Instead it uses layered memory:
+> Requires **Node.js >= 20.19** and **npm**.
 
-- Structured event logs for exact audit history.
-- Compact Markdown memory cards for human-readable project and team context.
-- A lightweight retrieval index for file-specific and rule-specific memory.
-- Pinned memory for stable rules that should always be included.
-- Retrieved memory for only the few past facts relevant to the current change.
+```bash
+git clone https://github.com/m-rithik/hubolt.git
+cd hubolt
+npm install
 
-Local stateless mode can keep memory under `.hubolt/`:
-
-```text
-.hubolt/
-  logs/
-    events.jsonl
-  memory/
-    repo.md
-    feedback.md
-    files/
-      src-api-users.md
-  index/
-    lexical.sqlite
+# Local review from source (no database needed)
+npm run dev -- analyze                 # analyzers only, no API key
+npm run dev -- review --staged         # full review (set a provider key first)
 ```
 
-Hosted mode stores the same concepts in Postgres, with optional vector search later. Raw logs are used for audit and debugging; prompts receive compact summaries and retrieved memory cards.
+Set a provider key in `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or
+`GOOGLE_GENERATIVE_AI_API_KEY`). See [Getting Started](docs/getting-started.md).
 
-Behavior packs are short review guidelines that shape how Hubolt reviews. The default pack should bias the reviewer toward explicit assumptions, simple recommendations, surgical comments, and verification steps. This follows the same spirit as Karpathy-style coding-agent guidelines while keeping Hubolt's own prompt small and review-specific.
+## Hosted (team server)
 
-## Roadmap
+When a team needs shared review history, governance, and one place to manage model
+keys, run the self-hostable server. It is a Fastify app backed by PostgreSQL, with
+Redis enabling the LLM gateway and the background review queue. Full guide:
+[Deployment](docs/deployment.md).
 
-### MVP
+### 1. Run the server
 
-- TypeScript CLI scaffold.
-- `.hubolt.yml` configuration.
-- Local JS/TS review with full-file context.
-- Tree-sitter semantic regions for changed functions and classes.
-- Typed review events and local event log.
-- OpenAI provider through the Vercel AI SDK.
-- Range-aware findings with evidence and verification.
-- Markdown and JSON reports.
-- TypeScript and ESLint analyzer legos.
-- Security check mode.
-- Evaluation harness with golden diff fixtures.
+```bash
+npm run db:start && npm run db:migrate     # Postgres + Redis, then migrations
+npm run dev:server                          # http://127.0.0.1:3000
+```
 
-### V1
+Create your first organization, admin user, and API key (the key is printed once):
 
-- GitHub Action integration.
-- Semgrep and secret scanning signals.
-- Persistent dedupe through finding fingerprints.
-- CI-mode reporting and cache.
-- Claude and Ollama provider support.
-- Model cascade for cost-aware review.
+```bash
+npm run dev -- server bootstrap --org local --email you@example.com --no-save-env
+```
 
-### Team Middleware
+The server also ships a web control panel at `http://127.0.0.1:3000/ui`.
 
-- Postgres and Prisma review history.
-- Hosted LLM gateway with org budgets, model routing, and audit logs.
-- API ingestion for CLI and CI review events.
-- Team history, audit export, and model usage reports.
+### 2. LLM gateway (one key for the team)
 
-### Webhooks and Feedback
+The gateway routes all model calls through a single Hubolt API key instead of
+distributing provider keys to every repo. It adds per-provider budgets, rate
+limits, model routing, and audit logs, and requires **Redis** (the `/gateway/*`
+routes register only when the server connects to Redis).
 
-- Fastify webhook service.
-- BullMQ workers and Redis queue.
-- PR summaries and inline comments.
-- GitHub suggestion blocks.
-- Incremental PR review and duplicate suppression.
-- Feedback learning from accepted and dismissed comments.
-- Org-level style memory.
+```bash
+# Encrypt stored provider credentials (set once, keep stable)
+export CREDENTIAL_MASTER_KEY=$(openssl rand -base64 32)   # add to the server .env
 
-### Enterprise Integrations
+# Add a provider credential via /ui, or via the API:
+curl -X POST http://127.0.0.1:3000/gateway/credentials \
+  -H "Authorization: Bearer <YOUR_HUBOLT_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"openai","apiKey":"<YOUR_OPENAI_API_KEY>"}'
 
-- RBAC, OAuth, audit logs, and team dashboards.
-- GitLab, Bitbucket, Slack, Teams, Jira, ClickUp, and Asana integrations.
+# Verify health, model catalog, budgets, and audit logging
+npm run dev -- gateway test
+```
 
-## Privacy and Security
+More: [API & Integrations](docs/api.md), [Configuration](docs/configuration.md).
 
-Hubolt is designed to be explicit about code movement.
+### 3. GitHub bot (hosted, via webhooks)
 
-- Stateless mode does not send code through a Hubolt-hosted middleman.
-- Local model support through Ollama is planned for repositories that cannot use hosted LLMs.
-- Reports can show which files and snippets were included in model context.
-- Local logs should be structured and redacted before storage.
-- Hosted audit logs should record prompt version, model, token usage, cost, memory references, and output hashes.
-- Secret redaction runs before prompt construction.
-- Reviewed code, comments, commit messages, and repository files are treated as untrusted data.
-- Prompts fence untrusted content so code cannot override review instructions.
-- Fixes are suggested for human review; Hubolt does not silently apply patches.
+Create a GitHub App, install it on your repos, and point its webhook at
+`POST /webhooks/github` on your server. Set these on the server (never commit them):
 
-## Contributing
+| Variable | Purpose |
+|----------|---------|
+| `GITHUB_APP_ID` | App id |
+| `GITHUB_APP_SLUG` | App slug |
+| `GITHUB_APP_PRIVATE_KEY` | App private key (PEM) |
+| `GITHUB_APP_WEBHOOK_SECRET` | Verifies inbound webhook signatures |
 
-Hubolt is intentionally modular. Useful contribution areas include:
+The server queues each event and a worker runs the review and comments back:
 
-- LLM providers.
-- Analyzer providers.
-- Source control providers.
-- Report renderers.
-- Evaluation fixtures.
-- Prompt and ranking improvements.
-- GitHub Action hardening.
-- Documentation and examples.
+```bash
+npm run dev -- worker      # background review workers (needs Redis)
+```
 
-The goal is a reviewer that developers keep enabled because it is accurate, explainable, and quiet when it should be quiet.
+Prefer no server? The [GitHub Action](.github/workflows/hubolt.yml) (or
+`hubolt github post` with a `GITHUB_TOKEN`) posts PR comments without one.
+
+## CLI quick reference
+
+Shown as `hubolt <command>`. From a source checkout, prefix with
+`npm run dev --` (e.g. `npm run dev -- review --staged`).
+
+| Command | What it does |
+|---------|--------------|
+| `hubolt review` | Review working-tree changes (`--staged` for staged only). |
+| `hubolt review --base main --head feature` | Review a commit range. |
+| `hubolt security --fail-on high` | Security-focused review with a severity gate. |
+| `hubolt analyze` | Static analyzers only, no LLM, no API key. |
+| `hubolt setup` | Pick a provider and save the key to `.env`. |
+| `hubolt config validate` | Validate `.hubolt.yml` and credentials. |
+| `hubolt providers list` | List providers and whether a key is present. |
+| `hubolt cache status` | Show review cache location and size. |
+| `hubolt logs tail` | Tail the local review event log. |
+| `hubolt server bootstrap` | Create the first org, admin, and API key. |
+| `hubolt push-report --report report.json` | Push a review to a team server. |
+| `hubolt gateway test` | Verify the LLM gateway. |
+| `hubolt worker` | Run background review workers (needs Redis). |
+
+Common review options: `--provider`, `--model`, `--no-llm`, `--no-cache`,
+`--json <path>`, `--md <path>`, `--ci`, `--fail-on <severity>`, `--config <path>`.
+Full reference: [Features](docs/features.md).
+
+## Documentation
+
+| Guide | What it covers |
+|-------|----------------|
+| [Getting Started](docs/getting-started.md) | Install, configure, first run, verify. |
+| [Configuration](docs/configuration.md) | Every env var and `.hubolt.yml`. |
+| [Project Structure](docs/project-structure.md) | Where everything lives. |
+| [Development](docs/development.md) | Scripts, dev server, debugging. |
+| [Features](docs/features.md) | Every command and module. |
+| [API & Integrations](docs/api.md) | Endpoints, auth, third-party services. |
+| [Database](docs/database.md) | Schema, migrations, backup/reset. |
+| [Testing](docs/testing.md) | Running and writing tests. |
+| [Deployment](docs/deployment.md) | Production and CI/CD. |
+| [Troubleshooting](docs/troubleshooting.md) | Common failures and fixes. |
+| [FAQ](docs/faq.md) | Quick answers. |
+| [Security](docs/security.md) | Secrets, auth, reporting issues. |
+| [Contributing](CONTRIBUTING.md) | How to contribute. |
+
+Historical development notes are in [docs/develop-log/](docs/develop-log/).
+
+## Support and community
+
+- **Star the repo** if you find it useful: [github.com/m-rithik/hubolt](https://github.com/m-rithik/hubolt)
+- **Found a bug or have an idea?** Open an [issue](https://github.com/m-rithik/hubolt/issues).
+- **Want to contribute?** Start with [CONTRIBUTING.md](CONTRIBUTING.md) - providers, analyzers, integrations, and docs are all welcome.
+- **Security report?** See [Security](docs/security.md) for how to report privately.
+
+## License
+
+[Apache-2.0](LICENSE). Contributions are accepted under the same license.
+

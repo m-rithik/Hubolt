@@ -1,0 +1,43 @@
+# Bitbucket Pipelines for Hubolt.
+#
+# - Pull requests and main: install, typecheck, test, build.
+#   Tests are fully mocked (no Postgres/Redis needed in CI).
+# - main also deploys: SSH into the server, which pulls latest, builds,
+#   migrates the database, and restarts the systemd service.
+#
+# No Docker and no image registry. Application secrets live ONLY in the
+# server's /opt/hubolt/.env file. Bitbucket only needs the deploy SSH key
+# (configured under Repository settings > Pipelines > SSH keys) and two
+# repository variables: DEPLOY_USER and DEPLOY_HOST.
+
+image: node:20
+
+definitions:
+  caches:
+    npmcache: ~/.npm
+  steps:
+    - step: &test-build
+        name: Test and build
+        caches:
+          - npmcache
+        script:
+          - npm ci
+          - npm run typecheck
+          - npm test
+          - npm run build
+
+pipelines:
+  pull-requests:
+    '**':
+      - step: *test-build
+  branches:
+    main:
+      - step: *test-build
+      - step:
+          name: Deploy to server
+          deployment: production
+          trigger: manual   # remove this line to deploy automatically on every green main build
+          script:
+            # The SSH key and the server host key are configured in
+            # Repository settings > Pipelines > SSH keys. No private key in the repo.
+            - ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd /opt/hubolt && bash deploy/deploy.sh"

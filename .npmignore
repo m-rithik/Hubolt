@@ -10,6 +10,13 @@ examples/
 .hubolt.yml
 ~/.hubolt/
 
+# Credential material (never publish private keys or certificates)
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+
 # Agent and planning docs
 AGENTS.md
 CLAUDE.md
@@ -17,6 +24,10 @@ PLAN.md
 Info.md
 .cursor/
 .github/copilot-instructions.md
+
+# Internal maintainer docs (the docs/ allowlist ships end-user guides; the
+# remediation/audit notes under docs/fixes are internal and stay out of the package)
+docs/fixes/
 
 # GitHub development files
 .github/workflows/

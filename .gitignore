@@ -13,7 +13,6 @@ build/
 .env
 .env.*
 !.env.example
-~/.hubolt/
 .hubolt/
 !.hubolt.example.yml
 
@@ -23,8 +22,13 @@ build/
 *.p12
 *.pfx
 *.keystore
+*.crt
+*.cert
+*.der
+id_rsa
+id_ed25519
 
-# Logs and reports
+# Logs and reports (generated review/report artifacts)
 logs/
 *.log
 npm-debug.log*
@@ -33,6 +37,16 @@ yarn-error.log*
 pnpm-debug.log*
 *.report.json
 *.report.md
+report.json
+report.md
+review.json
+
+# Database backups and deploy state (never commit data dumps)
+# NB: do NOT use *.sql here - prisma/migrations/**/migration.sql must stay tracked.
+backups/
+*.dump
+*.sql.gz
+.last_deploy
 
 # Test and coverage output
 coverage/
@@ -56,12 +70,16 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+*.swp
+*.swo
+*~
 
 # Local assistant settings
 .claude/settings.local.json
 .cursor/**/settings.local.json
 
 # Agent and dev guidance kept local
+# (If these are team-wide rules, track them instead with: git add -f CLAUDE.md AGENTS.md)
 CLAUDE.md
 AGENTS.md
 .cursor/rules/
@@ -71,7 +89,5 @@ AGENTS.md
 PLAN.md
 Info.md
 lol.txt
-report.md
-report.json
-docs/PHASE5_ROADMAP.md
-docs/PHASE6_FEEDBACK_MEMORY.md
+docs/develop-log/PHASE5_ROADMAP.md
+docs/develop-log/PHASE6_FEEDBACK_MEMORY.md
