@@ -350,10 +350,14 @@ export class LLMGateway {
     const usage = await this.getUsageSummary(orgId);
 
     return {
-      configuredProviders: creds.map((c) => ({
-        provider: c.provider,
-        lastUsed: c.lastUsedAt
-      })),
+      // Bitbucket credentials are stored in the same table but are not LLM
+      // providers; keep them out of the gateway's credential view.
+      configuredProviders: creds
+        .filter((c) => !c.provider.startsWith("bitbucket"))
+        .map((c) => ({
+          provider: c.provider,
+          lastUsed: c.lastUsedAt
+        })),
       queueStatus: stats,
       availableModels: models,
       usage

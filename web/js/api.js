@@ -106,6 +106,12 @@ export const api = {
   removeCredential: (provider) =>
     request(`/gateway/credentials/${encodeURIComponent(provider)}`, { method: "DELETE" }),
 
+  bitbucketConfig: () => request("/bitbucket/config"),
+  saveBitbucketConfig: (body) => request("/bitbucket/config", { method: "POST", body }),
+  clearBitbucketConfig: (field) =>
+    request(`/bitbucket/config/${encodeURIComponent(field)}`, { method: "DELETE" }),
+  setBitbucketModel: (body) => request("/bitbucket/config/model", { method: "PUT", body }),
+
   repos: () => request("/github-repos"),
   createRepo: (body) => request("/github-repos", { method: "POST", body }),
   deleteRepo: (fullName) => {

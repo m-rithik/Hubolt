@@ -15,6 +15,8 @@ import { registerGatewayRoutes } from "./routes/gateway.js";
 import { registerGitHubRepoRoutes } from "./routes/github-repos.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
+import { registerBitbucketWebhookRoutes } from "./routes/bitbucket-webhooks.js";
+import { registerBitbucketConfigRoutes } from "./routes/bitbucket-config.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { LLMGateway } from "./services/llm-gateway.js";
 import { createReviewJobProducer } from "../queue/review-jobs.js";
@@ -100,6 +102,13 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
   } else if (webhookSecrets.length > 0) {
     console.warn("A GitHub webhook secret is set but Redis is unavailable; webhook ingest disabled");
   }
+
+  // Bitbucket integration: webhook ingest (runs reviews) plus dashboard config
+  // routes so the API token and webhook secret can be set from the UI. The token
+  // and secret are resolved per request from stored config or the environment.
+  registerBitbucketWebhookRoutes(fastify, context);
+  registerBitbucketConfigRoutes(fastify, context);
+  console.log("Bitbucket integration enabled (webhook + dashboard config)");
 
   return fastify;
 }
