@@ -21,6 +21,8 @@ export function collectPrFeedback(comments: ReviewComment[]): FeedbackEventInput
     }
   }
 
+  let test = 1;
+
   for (const comment of comments) {
     const fingerprint = marked.get(comment.id);
     if (fingerprint) {

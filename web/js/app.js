@@ -88,10 +88,15 @@ async function buildSidebarFoot() {
   });
 
   try {
-    const org = await api.org();
+    const me = await api.me();
+    const org = me.org || await api.org().catch(() => null);
+    const userLabel = me.user ? (me.user.name || me.user.username || me.user.email) : null;
+    const subLabel = userLabel
+      ? [me.role || "user", org?.name || org?.slug].filter(Boolean).join(" . ")
+      : org?.slug;
     sidebarFoot.append(
-      el("span", { class: "org-name", text: org.name }),
-      el("span", { class: "org-slug", text: org.slug }),
+      el("span", { class: "org-name", text: userLabel || org?.name || "connected" }),
+      el("span", { class: "org-slug", text: subLabel || "" }),
       el("div", { class: "foot-actions" }, [keysHint, disconnect])
     );
   } catch {

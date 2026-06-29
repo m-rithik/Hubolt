@@ -1,10 +1,10 @@
 import type { PrismaClient } from "../../generated/prisma/index.js";
 import { BitbucketScmProvider } from "../../providers/scm/bitbucket/index.js";
-import { getLLMProvider } from "../../providers/llm/index.js";
 import { processReviewJob, type ReviewJobOutcome } from "../../queue/review-processor.js";
 import type { ReviewJob } from "../../queue/review-jobs.js";
 import { getActiveReviewThreshold, isValidSeverity } from "./bitbucket-config.js";
 import { SLACK_WEBHOOK_ENV, TEAMS_WEBHOOK_ENV } from "../../integrations/env-names.js";
+import { createHostedReviewLlm } from "./review-llm.js";
 
 /**
  * The tenant + credentials already resolved by the webhook (by matching the
@@ -85,13 +85,12 @@ export async function runBitbucketReview(
       config.integrations.slack.enabled = Boolean(slackWebhookUrl);
       return config;
     },
-    createLlm: (config) => {
-      // API key comes from the provider's environment variable - the
-      // single-tenant/local path.
-      // ponytail: per-org gateway-stored credentials are the multi-tenant slice.
+    createLlm: (config, job) => {
+      // Match the GitHub worker: hosted reviews first use the org's encrypted
+      // Gateway credential, falling back to env only when no stored key exists.
       const provider = config.providers.llm;
       const model = config.providers.model;
-      return getLLMProvider(provider, { model });
+      return createHostedReviewLlm(db, job.orgId, provider, model);
     }
   });
 }

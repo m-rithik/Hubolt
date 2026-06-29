@@ -5,9 +5,8 @@ import { ServerContext } from "../app.js";
 import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, isAdmin, requireAdmin } from "../middleware/auth.js";
 import { readableRepoIds } from "../services/repository-access.js";
 import { gitHubAppInstallUrl, isGitHubAppConfigured } from "../services/github-app.js";
-import { CredentialManager } from "../services/credential-manager.js";
+import { listGatewayReviewProviders } from "../services/review-models.js";
 import { REVIEW_QUEUE_NAME } from "../../queue/review-jobs.js";
-import { getProviderInfo } from "../../providers/llm/catalog.js";
 
 const ReviewModelSchema = z.object({
   provider: z.string().min(1).max(50),
@@ -239,7 +238,7 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
         reply.send({
           provider: org?.reviewLlmProvider ?? null,
           model: org?.reviewLlmModel ?? null,
-          providers: await listGatewayProviders(context.db, request.orgId!)
+          providers: await listGatewayReviewProviders(context.db, request.orgId!)
         });
       } catch (error) {
         fastify.log.error(error);
@@ -274,7 +273,7 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
       // The chosen provider must have a credential stored in the Gateway: that
       // encrypted key is what the worker uses, so picking a provider without one
       // would silently fall back to the server env.
-      const providers = await listGatewayProviders(context.db, request.orgId!);
+      const providers = await listGatewayReviewProviders(context.db, request.orgId!);
       if (!providers.some((entry) => entry.id === body.provider)) {
         reply.status(400).send({
           error: `No gateway credential for "${body.provider}". Add its API key in the Gateway tab first.`
@@ -334,45 +333,6 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
       }
     }
   );
-}
-
-/** Providers the org has a gateway credential for, with label and default model. */
-async function listGatewayProviders(
-  db: ServerContext["db"],
-  orgId: string
-): Promise<Array<{ id: string; label: string; defaultModel: string | null }>> {
-  if (!process.env.CREDENTIAL_MASTER_KEY) {
-    return [];
-  }
-  try {
-    const manager = new CredentialManager(db);
-    const creds = await manager.listCredentials(orgId);
-    return creds
-      // Only real LLM providers are selectable; internal pseudo-credentials
-      // (e.g. bitbucket_threshold) live in the same table and must be excluded.
-      .filter((cred) => Boolean(getProviderInfo(normalizeProviderId(cred.provider))))
-      .map((cred) => ({
-        id: cred.provider,
-        label: providerLabel(cred.provider),
-        defaultModel: providerDefaultModel(cred.provider)
-      }));
-  } catch {
-    return [];
-  }
-}
-
-// The credential catalog keys Anthropic as "claude" while the gateway stores
-// "anthropic"; normalize so labels and default models resolve either way.
-function normalizeProviderId(provider: string): string {
-  return provider === "anthropic" ? "claude" : provider;
-}
-
-function providerLabel(provider: string): string {
-  return getProviderInfo(normalizeProviderId(provider))?.label ?? provider;
-}
-
-function providerDefaultModel(provider: string): string | null {
-  return getProviderInfo(normalizeProviderId(provider))?.defaultModel ?? null;
 }
 
 function normalizeGithubOwner(value: string): string {

@@ -2,12 +2,11 @@ import { Worker, type ConnectionOptions } from "bullmq";
 import type { PrismaClient } from "../generated/prisma/index.js";
 import type { RedisClient } from "../server/redis.js";
 import { getRedisConnectionOptions, toBullMqConnectionOptions } from "../server/redis.js";
-import { getLLMProvider } from "../providers/llm/index.js";
-import type { LLMProvider } from "../types/providers.js";
 import type { RepoConfig } from "../config/schema.js";
+import type { LLMProvider } from "../types/providers.js";
 import { GitHubScmProvider } from "../providers/scm/github/index.js";
 import { getGitHubAppAuth, isGitHubAppConfigured } from "../server/services/github-app.js";
-import { CredentialManager } from "../server/services/credential-manager.js";
+import { createHostedReviewLlm } from "../server/services/review-llm.js";
 import { REVIEW_QUEUE_NAME, ReviewJobSchema, type ReviewJob } from "./review-jobs.js";
 import { processReviewJob, type ReviewProcessorDeps } from "./review-processor.js";
 
@@ -131,8 +130,7 @@ async function createReviewLlm(db: PrismaClient, job: ReviewJob, config: RepoCon
   const provider = config.providers.llm;
   const model = config.providers.model;
 
-  const apiKey = await resolveGatewayApiKey(db, job.orgId, provider);
-  return getLLMProvider(provider, { model, apiKey });
+  return createHostedReviewLlm(db, job.orgId, provider, model);
 }
 
 /**
@@ -155,29 +153,4 @@ async function resolveReviewConfig(db: PrismaClient, job: ReviewJob, config: Rep
   }
 
   return config;
-}
-
-/**
- * The org's gateway-stored API key for a provider, or undefined to let the
- * provider factory use its env var.
- *
- * Fail closed in hosted mode: getCredential returns null when the org has
- * configured no credential for this provider (env fallback is correct there),
- * but throws when a stored credential cannot be decrypted. Letting that error
- * propagate fails the review job rather than silently using the operator's
- * environment key and billing the wrong account. With no master key set there
- * are no stored credentials to resolve (single-tenant), so env fallback stands.
- */
-export async function resolveGatewayApiKey(
-  db: PrismaClient,
-  orgId: string,
-  provider: string
-): Promise<string | undefined> {
-  if (!process.env.CREDENTIAL_MASTER_KEY) {
-    return undefined;
-  }
-
-  const manager = new CredentialManager(db);
-  const key = await manager.getCredential(orgId, provider, { touchLastUsed: true });
-  return key ?? undefined;
 }

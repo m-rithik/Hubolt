@@ -122,6 +122,7 @@ export const api = {
   bitbucketConfig: () => request("/bitbucket/config"),
   setBitbucketModel: (body) => request("/bitbucket/config/model", { method: "PUT", body }),
   setBitbucketThreshold: (level) => request("/bitbucket/config/threshold", { method: "PUT", body: { level } }),
+  triggerBitbucketReview: (body) => request("/bitbucket/trigger", { method: "POST", body }),
 
   integrations: () => request("/integrations"),
   createIntegration: (body) => request("/integrations", { method: "POST", body }),

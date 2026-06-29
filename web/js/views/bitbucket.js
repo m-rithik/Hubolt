@@ -45,10 +45,17 @@ export async function renderBitbucket(container, state = {}) {
     ),
     section(
       "Review model",
-      "Which provider and model write the review. Uses the provider's API key from the environment.",
+      "Which provider and model write the review. Uses the provider API key saved in Gateway.",
       [
         el("p", { class: "dim", text: activeText }),
         el("div", { class: "panel admin-only", style: "margin-top:8px" }, reviewModelForm(cfg, messageSlot, container))
+      ]
+    ),
+    section(
+      "Test trigger",
+      "Run a Bitbucket review for an existing pull request using the stored integration.",
+      [
+        el("div", { class: "panel admin-only", style: "margin-top:8px" }, triggerForm(integ, messageSlot, container))
       ]
     ),
     section(
@@ -60,6 +67,48 @@ export async function renderBitbucket(container, state = {}) {
       ]
     )
   );
+}
+
+function triggerForm(integ, messageSlot, container) {
+  const integrations = integ.integrations || [];
+  if (integrations.length === 0) {
+    return emptyState("Add a repository integration before triggering a test review.");
+  }
+
+  const repo = el(
+    "select",
+    {},
+    integrations.map((entry) => el("option", { value: entry.repoId, text: entry.repoFullName || entry.repoId }))
+  );
+  const prNumber = el("input", { type: "number", min: "1", step: "1", placeholder: "Pull request #", autocomplete: "off" });
+  const submit = el("button", { class: "primary", type: "submit", text: "Trigger review" });
+
+  const form = el("form", { class: "form-row" }, [
+    el("div", { class: "field" }, [el("label", { text: "Repository" }), repo]),
+    el("div", { class: "field" }, [el("label", { text: "Pull request" }), prNumber]),
+    submit
+  ]);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const number = Number(prNumber.value);
+    if (!Number.isInteger(number) || number <= 0) {
+      messageSlot.replaceChildren(notice("error", "Enter a valid pull request number"));
+      return;
+    }
+    submit.disabled = true;
+    submit.textContent = "triggering...";
+    try {
+      const result = await api.triggerBitbucketReview({ repoId: repo.value, prNumber: number });
+      await renderBitbucket(container, { flash: `Triggered ${result.repository} PR #${result.prNumber}` });
+    } catch (error) {
+      messageSlot.replaceChildren(notice("error", error.message));
+      submit.disabled = false;
+      submit.textContent = "Trigger review";
+    }
+  });
+
+  return form;
 }
 
 function thresholdForm(cfg, messageSlot, container) {
@@ -177,6 +226,9 @@ function integrationForm(_integ, messageSlot, container) {
 function reviewModelForm(cfg, messageSlot, container) {
   const providers = cfg.providers || [];
   const active = cfg.activeModel || {};
+  if (providers.length === 0) {
+    return emptyState("Add an LLM provider key in Gateway before selecting a Bitbucket review model.");
+  }
 
   const provider = el(
     "select",

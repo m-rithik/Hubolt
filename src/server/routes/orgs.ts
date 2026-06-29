@@ -55,7 +55,32 @@ export function registerOrgRoutes(fastify: FastifyInstance, context: ServerConte
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
-      reply.send({ orgId: request.orgId, role: request.role ?? "admin" });
+      try {
+        const [org, user] = await Promise.all([
+          context.db.organization.findUnique({
+            where: { id: request.orgId! },
+            select: { id: true, name: true, slug: true }
+          }),
+          request.userId
+            ? context.db.user.findUnique({
+                where: { id: request.userId },
+                select: { id: true, username: true, name: true, email: true }
+              })
+            : Promise.resolve(null)
+        ]);
+
+        reply.send({
+          orgId: request.orgId,
+          role: request.role ?? "admin",
+          org: org ? { id: org.id, name: org.name, slug: org.slug } : null,
+          user: user
+            ? { id: user.id, username: user.username, name: user.name, email: user.email }
+            : null
+        });
+      } catch (error) {
+        request.log.error(error);
+        reply.status(500).send({ error: "Failed to fetch identity" });
+      }
     }
   );
 

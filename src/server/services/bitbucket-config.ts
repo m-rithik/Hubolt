@@ -1,5 +1,10 @@
 import type { PrismaClient } from "../../generated/prisma/index.js";
 import { CredentialManager } from "./credential-manager.js";
+import {
+  isKnownReviewProvider,
+  listGatewayReviewProviders,
+  type ReviewProviderInfo
+} from "./review-models.js";
 
 /**
  * Org-level review settings for the dashboard: the active LLM provider/model and
@@ -36,36 +41,12 @@ async function readStored(db: PrismaClient, orgId: string, provider: string): Pr
   }
 }
 
-// Providers the review can use, with the env var that supplies each key. The id
-// is what getLLMProvider expects ("claude" for Anthropic). The review runner
-// uses these env keys directly, so a gateway credential is not required.
-const REVIEW_PROVIDERS = [
-  { id: "claude", label: "Anthropic (Claude)", defaultModel: "claude-haiku-4-5-20251001", envKey: "ANTHROPIC_API_KEY" },
-  { id: "openai", label: "OpenAI", defaultModel: "gpt-4.1-mini", envKey: "OPENAI_API_KEY" },
-  { id: "google", label: "Google (Gemini)", defaultModel: "gemini-flash-latest", envKey: "GOOGLE_GENERATIVE_AI_API_KEY" }
-] as const;
-
-export interface ReviewProviderInfo {
-  id: string;
-  label: string;
-  defaultModel: string;
-  /** True when this provider's API key is present in the environment. */
-  keyPresent: boolean;
+/** The selectable review providers backed by this org's gateway credentials. */
+export async function listReviewProviders(db: PrismaClient, orgId: string): Promise<ReviewProviderInfo[]> {
+  return listGatewayReviewProviders(db, orgId);
 }
 
-/** The selectable review providers and whether each has a usable key. */
-export function listReviewProviders(): ReviewProviderInfo[] {
-  return REVIEW_PROVIDERS.map((p) => ({
-    id: p.id,
-    label: p.label,
-    defaultModel: p.defaultModel,
-    keyPresent: Boolean(process.env[p.envKey])
-  }));
-}
-
-export function isKnownReviewProvider(id: string): boolean {
-  return REVIEW_PROVIDERS.some((p) => p.id === id);
-}
+export { isKnownReviewProvider };
 
 /** The org's currently active review provider/model (the one reviews use). */
 export async function getActiveReviewModel(

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { CredentialManager } from "../../src/server/services/credential-manager.js";
-import { resolveGatewayApiKey } from "../../src/queue/worker.js";
+import { resolveGatewayApiKey } from "../../src/server/services/review-llm.js";
 
 describe("resolveGatewayApiKey", () => {
   const original = process.env.CREDENTIAL_MASTER_KEY;
@@ -27,6 +27,28 @@ describe("resolveGatewayApiKey", () => {
     const db: any = { providerCredential: { findUnique: vi.fn().mockResolvedValue(null) } };
 
     await expect(resolveGatewayApiKey(db, "org_1", "anthropic")).resolves.toBeUndefined();
+  });
+
+  test("resolves a gateway Anthropic credential for legacy claude review config", async () => {
+    process.env.CREDENTIAL_MASTER_KEY = CredentialManager.generateMasterKey();
+    const db: any = {
+      providerCredential: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: "cred_1",
+            provider: "anthropic",
+            encryptedKey: "ciphertext"
+          }),
+        update: vi.fn()
+      }
+    };
+    vi.spyOn(CredentialManager.prototype, "getCredential")
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("anthropic-key");
+
+    await expect(resolveGatewayApiKey(db, "org_1", "claude")).resolves.toBe("anthropic-key");
   });
 
   test("fails closed when a stored credential cannot be decrypted", async () => {

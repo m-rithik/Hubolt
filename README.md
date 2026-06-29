@@ -36,6 +36,9 @@ reviews, and stays quiet when there is nothing worth saying.
 
 **What makes it different**
 
+
+
+
 - **Context-aware, not diff-only.** Pulls in changed files, semantic regions
   (tree-sitter), and analyzer signals before calling the model.
 - **Evidence over opinions.** Each finding explains what, why it matters, and how

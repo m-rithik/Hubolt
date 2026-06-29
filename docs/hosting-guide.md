@@ -298,12 +298,22 @@ tunnel URL.
 1. In the Hubolt dashboard, create a Bitbucket integration for the repository:
    provide the Bitbucket API token and a webhook secret. Both are stored
    encrypted (requires `CREDENTIAL_MASTER_KEY`).
-2. In Bitbucket: Repository settings > Webhooks > Add webhook:
+2. In the Gateway tab, store the LLM provider API key the review should use,
+   then select that provider/model in the Bitbucket tab. Hosted Bitbucket
+   reviews use the same encrypted Gateway credentials as GitHub reviews; they do
+   not rely on process-wide LLM env keys except as a single-tenant fallback when
+   no stored credential exists.
+3. In Bitbucket: Repository settings > Webhooks > Add webhook:
    - URL: `https://your.domain.com/webhooks/bitbucket`
    - Triggers: Pull request - Created, Updated.
    - Set the secret to the same value configured in the dashboard.
-3. No worker or Redis is needed for Bitbucket; the review runs in the server
-   process in the background.
+4. No worker is needed for Bitbucket; the review runs in the server process in
+   the background. Redis is only needed to expose the Gateway UI/routes used to
+   save provider keys and for GitHub queue processing.
+5. For testing, admins can use `POST /bitbucket/trigger` or the Bitbucket tab's
+   Test trigger form to run a review for an existing PR using the stored
+   integration. This endpoint is authenticated and does not replace the signed
+   public webhook.
 
 ### Signature verification, replay, retries, timeouts, fast ack
 
@@ -557,6 +567,11 @@ jobs:
   GitHub credential (App not configured and no `GITHUB_TOKEN`), provider/API
   error, or LLM key/budget. Jobs retry 3x; persistent failures stay in the
   failed set for 24h.
+- **Bitbucket review cannot find an LLM key:** store the provider API key in the
+  Gateway tab first, then select that provider/model in the Bitbucket tab. The
+  selectable providers are the org's Gateway-stored credentials. For Anthropic,
+  the Gateway stores the provider as `anthropic`; legacy `claude` review
+  selections still resolve to that key at review time.
 - **Database issues:** `/health` shows `database.connected: false`. Verify
   Postgres is up, `DATABASE_URL` is correct, and migrations are applied
   (`npm run db:migrate`). `db:check-drift` flags schema/migration mismatch; if
@@ -778,6 +793,11 @@ redis-cli LLEN bull:hubolt-review-jobs:failed  # ideally 0
 # 3. Watch worker logs: "Review job ... <n> finding(s)" (GitHub),
 #    or server logs: "Bitbucket review finished" (Bitbucket).
 # 4. Confirm review comments appear on the PR and a Review row is persisted.
+# 5. For Bitbucket only, an admin can also trigger a test review with:
+#    curl -X POST https://your.domain.com/bitbucket/trigger \
+#      -H "Authorization: Bearer <admin-api-key>" \
+#      -H "Content-Type: application/json" \
+#      -d '{"repoFullName":"workspace/repo","prNumber":1}'
 ```
 
 ---

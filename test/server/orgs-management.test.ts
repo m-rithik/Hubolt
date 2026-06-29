@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { describe, expect, test, vi } from "vitest";
 import { registerOrgRoutes } from "../../src/server/routes/orgs.js";
+import { generateSessionToken } from "../../src/server/auth/sessions.js";
 
 const HEADERS = { authorization: `Bearer ${["org", "mgmt", "token"].join("_")}` };
 
@@ -16,11 +17,31 @@ function makeDb(authRole: string = "admin") {
       delete: vi.fn()
     },
     organization: {
+      findUnique: vi.fn(() => Promise.resolve({ id: "org_1", name: "local", slug: "local" })),
       update: vi.fn((args: any) => Promise.resolve({ id: "org_1", name: args.data.name, slug: "acme" }))
     },
     user: {
+      findUnique: vi.fn(() => Promise.resolve({ id: "u1", email: "admin@local", username: "admin", name: "Admin" })),
       upsert: vi.fn((args: any) => Promise.resolve({ id: "u1", email: args.where.email, name: args.create.name })),
       delete: vi.fn().mockResolvedValue({})
+    },
+    session: {
+      findUnique: vi.fn(() =>
+        Promise.resolve({
+          id: "s1",
+          userId: "u1",
+          orgId: "org_1",
+          expiresAt: new Date(Date.now() + 60_000),
+          lastUsedAt: new Date(),
+          user: {
+            id: "u1",
+            status: "active",
+            mustChangePassword: false,
+            orgs: [{ orgId: "org_1", role: authRole }]
+          }
+        })
+      ),
+      update: vi.fn()
     },
     organizationMember: {
       upsert: vi.fn((args: any) => Promise.resolve({ id: "m1", role: args.create.role })),
@@ -44,6 +65,21 @@ function buildApp(db: any) {
 }
 
 describe("organization management", () => {
+  test("auth/me includes user identity for username/password sessions", async () => {
+    const db = makeDb();
+    const app = buildApp(db);
+    const token = generateSessionToken();
+    const res = await app.inject({ method: "GET", url: "/auth/me", headers: { authorization: `Bearer ${token}` } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      role: "admin",
+      org: { id: "org_1", name: "local", slug: "local" },
+      user: { id: "u1", username: "admin", name: "Admin" }
+    });
+    await app.close();
+  });
+
   test("admin renames the organization", async () => {
     const db = makeDb();
     const app = buildApp(db);
