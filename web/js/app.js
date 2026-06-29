@@ -78,6 +78,7 @@ function setActiveNav(path) {
 async function buildSidebarFoot() {
   clear(sidebarFoot);
   const keysHint = el("button", { class: "foot-link", text: "? keymap" });
+  const version = el("span", { class: "foot-version", text: "1.0" });
   keysHint.addEventListener("click", toggleKeymap);
   const disconnect = el("button", { class: "foot-link", text: "disconnect" });
   disconnect.addEventListener("click", async () => {
@@ -97,10 +98,10 @@ async function buildSidebarFoot() {
     sidebarFoot.append(
       el("span", { class: "org-name", text: userLabel || org?.name || "connected" }),
       el("span", { class: "org-slug", text: subLabel || "" }),
-      el("div", { class: "foot-actions" }, [keysHint, disconnect])
+      el("div", { class: "foot-actions" }, [keysHint, version, disconnect])
     );
   } catch {
-    sidebarFoot.append(el("div", { class: "foot-actions" }, [keysHint, disconnect]));
+    sidebarFoot.append(el("div", { class: "foot-actions" }, [keysHint, version, disconnect]));
   }
 }
 

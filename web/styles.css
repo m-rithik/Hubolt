@@ -316,6 +316,13 @@ a { color: inherit; }
   font-size: 11px;
 }
 
+.sidebar-foot .foot-version {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .sidebar-foot .foot-link::after {
   display: none;
 }
