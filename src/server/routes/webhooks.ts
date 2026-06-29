@@ -68,6 +68,26 @@ export function registerWebhookRoutes(
       // current so the dashboard reflects reality before the first pull request.
       const installationChange = classifyInstallationEvent(eventName, body);
       if (installationChange) {
+        const deliveryHeader = request.headers["x-github-delivery"];
+        const deliveryId = typeof deliveryHeader === "string" ? deliveryHeader.trim() : "";
+        if (!deliveryId) {
+          reply.status(400).send({ processed: false, reason: "missing delivery id" } satisfies WebhookResponse);
+          return;
+        }
+
+        let claimed: boolean;
+        try {
+          claimed = await claimWebhookDelivery(context.db, "github", deliveryId, eventName ?? "installation");
+        } catch (error) {
+          request.log.error({ err: error }, "failed to claim webhook delivery");
+          reply.status(500).send({ processed: false, reason: "failed to record delivery" } satisfies WebhookResponse);
+          return;
+        }
+        if (!claimed) {
+          reply.status(202).send({ processed: false, reason: "duplicate delivery" } satisfies WebhookResponse);
+          return;
+        }
+
         try {
           await applyInstallationChange(context.db, installationChange);
         } catch (error) {
@@ -92,8 +112,21 @@ export function registerWebhookRoutes(
       const event = classification.event;
 
       try {
+        // Tenant binding: match the registered repo by BOTH full name AND the
+        // delivery's installation id, so a slug another org merely "registered"
+        // cannot capture the real owner's webhook. The installation id is bound
+        // to a repo only by install events, never assigned from PR deliveries.
+        const installationId = event.installation ? String(event.installation.id) : undefined;
+        if (!installationId) {
+          reply.status(202).send({
+            processed: false,
+            reason: "delivery has no installation id"
+          } satisfies WebhookResponse);
+          return;
+        }
+
         const repos = await context.db.repository.findMany({
-          where: { fullName: event.repository.full_name, disabledAt: null },
+          where: { fullName: event.repository.full_name, installationId, disabledAt: null },
           select: { id: true, orgId: true },
           take: 2
         });
@@ -101,7 +134,7 @@ export function registerWebhookRoutes(
         if (repos.length === 0) {
           reply.status(202).send({
             processed: false,
-            reason: "repository is not registered with any organization"
+            reason: "installation is not registered for this repository"
           } satisfies WebhookResponse);
           return;
         }
@@ -109,7 +142,7 @@ export function registerWebhookRoutes(
         if (repos.length > 1) {
           request.log.warn(
             { repository: event.repository.full_name },
-            "webhook repository is registered with multiple organizations; skipping"
+            "repository+installation is registered with multiple organizations; skipping"
           );
           reply.status(202).send({
             processed: false,
@@ -120,21 +153,6 @@ export function registerWebhookRoutes(
 
         const repo = repos[0];
         const deliveryHeader = request.headers["x-github-delivery"];
-        const installationId = event.installation ? String(event.installation.id) : undefined;
-
-        // Remember which installation grants access to this repo so the
-        // dashboard can show install status and the worker can mint a token.
-        // Best-effort: a failed update must not block enqueueing the review.
-        if (installationId) {
-          try {
-            await context.db.repository.update({
-              where: { id: repo.id },
-              data: { installationId }
-            });
-          } catch (error) {
-            request.log.warn({ err: error, repoId: repo.id }, "failed to persist installation id");
-          }
-        }
 
         const { jobId, created } = await options.producer.enqueue({
           orgId: repo.orgId,
@@ -159,17 +177,33 @@ export function registerWebhookRoutes(
 }
 
 /**
- * Reflect an App install/uninstall onto registered repos. Matching is by full
- * name (the installation grants access regardless of which Hubolt org
- * registered the repo); unlinking is scoped to the same installation so a
+ * Reflect an App install/uninstall onto registered repos. Linking refuses
+ * ambiguous active registrations instead of stamping the same installation id
+ * onto multiple tenants' rows; unlinking is scoped to the same installation so a
  * removal cannot clear a repo wired to a different installation.
  */
 async function applyInstallationChange(db: ServerContext["db"], change: InstallationChange): Promise<void> {
-  if (change.linked.length > 0) {
-    await db.repository.updateMany({
-      where: { fullName: { in: change.linked } },
-      data: { installationId: change.installationId }
-    });
+  const accountLogin = change.accountLogin ? normalizeGithubOwner(change.accountLogin) : null;
+  if (accountLogin) {
+    for (const fullName of new Set(change.linked)) {
+      const owner = repoOwner(fullName);
+      if (!owner || owner !== accountLogin) {
+        continue;
+      }
+
+      const repos = await db.repository.findMany({
+        where: { fullName, disabledAt: null },
+        select: { id: true, org: { select: { slug: true } } },
+        take: 2
+      });
+      const eligible = repos.filter((repo) => normalizeGithubOwner(repo.org.slug) === accountLogin);
+      if (eligible.length === 1) {
+        await db.repository.update({
+          where: { id: eligible[0].id },
+          data: { installationId: change.installationId }
+        });
+      }
+    }
   }
 
   if (change.unlinked.length > 0) {
@@ -178,4 +212,36 @@ async function applyInstallationChange(db: ServerContext["db"], change: Installa
       data: { installationId: null }
     });
   }
+}
+
+async function claimWebhookDelivery(
+  db: ServerContext["db"],
+  provider: string,
+  deliveryId: string,
+  event: string
+): Promise<boolean> {
+  try {
+    await db.webhookDelivery.create({
+      data: { provider, deliveryId, event }
+    });
+    return true;
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "P2002");
+}
+
+function repoOwner(fullName: string): string | null {
+  const owner = fullName.split("/")[0];
+  return owner ? normalizeGithubOwner(owner) : null;
+}
+
+function normalizeGithubOwner(value: string): string {
+  return value.trim().toLowerCase();
 }

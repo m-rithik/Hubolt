@@ -9,6 +9,7 @@ import { renderGitHubRepos } from "./views/github-repos.js";
 import { renderBitbucket } from "./views/bitbucket.js";
 import { renderAudit } from "./views/audit.js";
 import { renderOrganization } from "./views/organization.js";
+import { renderUsers } from "./views/users.js";
 
 const ROUTES = [
   { path: "overview", title: "Overview", description: "Health, queue pressure, recent reviews, and monthly spend.", render: renderOverview },
@@ -17,12 +18,13 @@ const ROUTES = [
   { path: "gateway", title: "Gateway", description: "LLM credentials, queue state, and routeable model catalog.", render: renderGateway },
   { path: "repos", title: "GitHub Repos", description: "Registered repositories reviewed automatically on every pull request.", render: renderGitHubRepos },
   { path: "bitbucket", title: "Bitbucket", description: "API token and webhook secret for the Bitbucket review bot.", render: renderBitbucket },
+  { path: "users", title: "Users", description: "Create users, set roles, and grant developers access to specific repositories.", render: renderUsers },
   { path: "audit", title: "Audit log", description: "Organization actions recorded for operational traceability.", render: renderAudit },
   { path: "organization", title: "Organization", description: "Members, API key metadata, and account identity.", render: renderOrganization }
 ];
 
 const KEYMAP = [
-  ["1-8", "switch view"],
+  ["1-9", "switch view"],
   ["j / k", "move row selection"],
   ["enter", "open selected row"],
   ["/", "focus the filter"],
@@ -78,7 +80,9 @@ async function buildSidebarFoot() {
   const keysHint = el("button", { class: "foot-link", text: "? keymap" });
   keysHint.addEventListener("click", toggleKeymap);
   const disconnect = el("button", { class: "foot-link", text: "disconnect" });
-  disconnect.addEventListener("click", () => {
+  disconnect.addEventListener("click", async () => {
+    // Best-effort server-side logout (no-op for API keys); always clear locally.
+    await api.logout().catch(() => {});
     clearKey();
     boot();
   });
@@ -233,7 +237,7 @@ document.addEventListener("keydown", (event) => {
 
   if (isTyping()) return;
 
-  if (event.key >= "1" && event.key <= "8") {
+  if (event.key >= "1" && event.key <= "9") {
     const route = ROUTES[Number(event.key) - 1];
     if (route) window.location.hash = `#/${route.path}`;
     return;

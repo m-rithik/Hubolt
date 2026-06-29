@@ -104,6 +104,7 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
     "/ingest/review",
     async (request, reply) => {
       let reservedUsage: { orgId: string; provider: string; model: string; costUsd: number } | null = null;
+      let ingestLock: { repoId: string; fingerprint: string } | null = null;
 
       try {
         const payload = IngestPayloadSchema.parse(request.body);
@@ -164,6 +165,17 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
             url: payload.repository.url
           }
         });
+
+        const lockAcquired = await acquireIngestLock(context.db, repo.id, payload.review.fingerprint);
+        if (!lockAcquired) {
+          reply.status(202).send({
+            success: true,
+            reviewId: "",
+            message: "Review ingest is already processing"
+          });
+          return;
+        }
+        ingestLock = { repoId: repo.id, fingerprint: payload.review.fingerprint };
 
         const existingReview = await context.db.review.findUnique({
           where: { repoId_fingerprint: { repoId: repo.id, fingerprint: payload.review.fingerprint } },
@@ -339,7 +351,54 @@ export function registerIngestRoutes(fastify: FastifyInstance, context: ServerCo
           reviewId: "",
           message: "Failed to ingest review"
         });
+      } finally {
+        if (ingestLock) {
+          try {
+            await releaseIngestLock(context.db, ingestLock.repoId, ingestLock.fingerprint);
+          } catch (error) {
+            fastify.log.error(error);
+          }
+        }
       }
     }
   );
+}
+
+const INGEST_LOCK_TTL_MS = 30 * 60 * 1000;
+
+async function acquireIngestLock(db: ServerContext["db"], repoId: string, fingerprint: string): Promise<boolean> {
+  const lockTable = (db as any).reviewIngestLock;
+  if (!lockTable) {
+    return true;
+  }
+
+  const now = new Date();
+  try {
+    await lockTable.deleteMany({ where: { expiresAt: { lt: now } } });
+    await lockTable.create({
+      data: {
+        repoId,
+        fingerprint,
+        expiresAt: new Date(now.getTime() + INGEST_LOCK_TTL_MS)
+      }
+    });
+    return true;
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function releaseIngestLock(db: ServerContext["db"], repoId: string, fingerprint: string): Promise<void> {
+  const lockTable = (db as any).reviewIngestLock;
+  if (!lockTable) {
+    return;
+  }
+  await lockTable.deleteMany({ where: { repoId, fingerprint } });
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "P2002");
 }

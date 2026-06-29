@@ -263,6 +263,7 @@ export class LLMGateway {
             queuedRequest.budgetReservation.provider,
             queuedRequest.budgetReservation.estimatedCostUsd
           );
+          await this.refundRateLimitSlot(request.orgId, provider, model);
         }
         throw error;
       }

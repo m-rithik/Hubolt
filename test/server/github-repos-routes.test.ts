@@ -36,6 +36,7 @@ function makeDb(role: string = "admin") {
           createdAt: new Date("2026-01-02T00:00:00.000Z")
         }
       ]),
+      findFirst: vi.fn().mockResolvedValue(null),
       upsert: vi.fn().mockResolvedValue({
         id: "repo_1",
         fullName: "owner/repo",
@@ -47,7 +48,7 @@ function makeDb(role: string = "admin") {
       update: vi.fn().mockResolvedValue({})
     },
     organization: {
-      findUnique: vi.fn().mockResolvedValue({ reviewLlmProvider: null, reviewLlmModel: null }),
+      findUnique: vi.fn().mockResolvedValue({ slug: "owner", reviewLlmProvider: null, reviewLlmModel: null }),
       update: vi.fn().mockResolvedValue({})
     },
     auditEvent: { create: vi.fn().mockResolvedValue({}) }
@@ -109,6 +110,41 @@ describe("github-repos routes", () => {
     expect(db.auditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "repository.registered" }) })
     );
+    await app.close();
+  });
+
+  test("rejects registering an active repo slug owned by another org", async () => {
+    const db = makeDb();
+    db.repository.findFirst.mockResolvedValue({ id: "repo_other" });
+    const app = buildApp(db);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/github-repos",
+      headers: bearerHeaders(),
+      payload: { url: "https://github.com/owner/repo" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(db.repository.upsert).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("rejects registering a repo whose owner does not match the org slug", async () => {
+    const db = makeDb();
+    db.organization.findUnique.mockResolvedValue({ slug: "other-org" });
+    const app = buildApp(db);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/github-repos",
+      headers: bearerHeaders(),
+      payload: { url: "https://github.com/owner/repo" }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.repository.findFirst).not.toHaveBeenCalled();
+    expect(db.repository.upsert).not.toHaveBeenCalled();
     await app.close();
   });
 

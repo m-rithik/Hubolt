@@ -10,46 +10,12 @@ export async function renderBitbucket(container, state = {}) {
     return;
   }
 
+  const integ = await api.integrations().catch(() => ({ integrations: [], repos: [] }));
+
   const messageSlot = el("div");
   if (state.flash) {
     messageSlot.append(flashNotice(state.flash));
   }
-
-  const statusText = (configured, fromEnv) =>
-    configured ? (fromEnv ? "set (from .env)" : "set (stored)") : "not set";
-
-  const row = (label, field, configured, fromEnv) => {
-    const cells = [
-      el("td", { text: label }),
-      el("td", { class: configured ? "" : "dim", text: statusText(configured, fromEnv) })
-    ];
-    // Only stored values can be cleared here; env values live in .env.
-    if (configured && !fromEnv) {
-      const remove = el("button", { class: "quiet-danger admin-only", text: "Clear" });
-      remove.addEventListener("click", (event) => {
-        confirmInline(event.target.closest("td"), async () => {
-          try {
-            await api.clearBitbucketConfig(field);
-            await renderBitbucket(container, { flash: `${label} cleared` });
-          } catch (error) {
-            messageSlot.replaceChildren(notice("error", error.message));
-          }
-        });
-      });
-      cells.push(el("td", { class: "actions" }, remove));
-    } else {
-      cells.push(el("td", {}));
-    }
-    return el("tr", {}, cells);
-  };
-
-  const statusTable = table(
-    ["Setting", "Status", ""],
-    [
-      row("API token", "token", cfg.tokenConfigured, cfg.tokenFromEnv),
-      row("Webhook secret", "secret", cfg.webhookSecretConfigured, cfg.webhookSecretFromEnv)
-    ]
-  );
 
   const webhookHint = el("div", { class: "panel", style: "margin-top:16px" }, [
     el("div", { class: "field-label", text: "Webhook URL" }),
@@ -69,9 +35,13 @@ export async function renderBitbucket(container, state = {}) {
   container.replaceChildren(
     messageSlot,
     section(
-      "Bitbucket",
-      "Configure the Bitbucket review bot here instead of editing .env. Secrets are encrypted at rest and never shown after saving.",
-      [statusTable, el("div", { class: "panel admin-only", style: "margin-top:16px" }, configForm(messageSlot, container)), webhookHint]
+      "Repository integrations",
+      "Each repository has its own named integration: one repo, one API token, one webhook secret. Tokens and secrets cannot be reused across integrations.",
+      [
+        integrationsTable(integ, messageSlot, container),
+        el("div", { class: "panel admin-only", style: "margin-top:16px" }, integrationForm(integ, messageSlot, container)),
+        webhookHint
+      ]
     ),
     section(
       "Review model",
@@ -80,8 +50,128 @@ export async function renderBitbucket(container, state = {}) {
         el("p", { class: "dim", text: activeText }),
         el("div", { class: "panel admin-only", style: "margin-top:8px" }, reviewModelForm(cfg, messageSlot, container))
       ]
+    ),
+    section(
+      "Severity threshold",
+      "Reviews report findings at or above this severity. Lower it to surface more.",
+      [
+        el("p", { class: "dim", text: `Current: ${cfg.activeThreshold || "repo default (.hubolt.yml)"}` }),
+        el("div", { class: "panel admin-only", style: "margin-top:8px" }, thresholdForm(cfg, messageSlot, container))
+      ]
     )
   );
+}
+
+function thresholdForm(cfg, messageSlot, container) {
+  const levels = cfg.severityLevels || ["info", "low", "medium", "high", "critical"];
+  const select = el("select", {}, levels.map((l) => el("option", { value: l, text: l })));
+  if (cfg.activeThreshold) select.value = cfg.activeThreshold;
+  const submit = el("button", { class: "primary", type: "submit", text: "Set threshold" });
+
+  const form = el("form", { class: "form-row" }, [
+    el("div", { class: "field" }, [el("label", { text: "Report at or above" }), select]),
+    submit
+  ]);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    submit.textContent = "saving...";
+    try {
+      await api.setBitbucketThreshold(select.value);
+      await renderBitbucket(container, { flash: `Severity threshold set to ${select.value}` });
+    } catch (error) {
+      messageSlot.replaceChildren(notice("error", error.message));
+      submit.disabled = false;
+      submit.textContent = "Set threshold";
+    }
+  });
+
+  return form;
+}
+
+function integrationsTable(integ, messageSlot, container) {
+  const rows = integ.integrations || [];
+  if (rows.length === 0) {
+    return emptyState("No repository integrations yet. Add one below.");
+  }
+  return table(
+    ["Name", "Repository", "Token", "Webhook", "Slack", ""],
+    rows.map((r) => {
+      const remove = el("button", { class: "quiet-danger admin-only", text: "Remove" });
+      remove.addEventListener("click", (event) => {
+        confirmInline(event.target.closest("td"), async () => {
+          try {
+            await api.deleteIntegration(r.repoId);
+            await renderBitbucket(container, { flash: `Integration "${r.name}" removed` });
+          } catch (error) {
+            messageSlot.replaceChildren(notice("error", error.message));
+          }
+        });
+      });
+      return el("tr", {}, [
+        el("td", { text: r.name }),
+        el("td", { class: "mono", text: r.repoFullName || r.repoId }),
+        el("td", { class: "mono dim", text: r.tokenLast4 ? `••${r.tokenLast4}` : "configured" }),
+        el("td", { class: "dim", text: r.webhookSecretConfigured ? "set" : "-" }),
+        el("td", { class: "dim", text: r.slackConfigured ? "set" : "-" }),
+        el("td", { class: "actions" }, remove)
+      ]);
+    })
+  );
+}
+
+function integrationForm(_integ, messageSlot, container) {
+  // One coherent form: type the Bitbucket repo, name it, paste its credentials.
+  // The repo record is created automatically; provider is always Bitbucket here.
+  const repoFullName = el("input", { type: "text", placeholder: "workspace/repo  (e.g. acme/payments)", autocomplete: "off" });
+  const name = el("input", { type: "text", placeholder: "e.g. Payments Service Bitbucket Connection", autocomplete: "off" });
+  const token = el("input", { type: "password", placeholder: "Repository Access Token (ATCTT...)", autocomplete: "off" });
+  const secret = el("input", { type: "password", placeholder: "Webhook secret", autocomplete: "off" });
+  const slack = el("input", { type: "password", placeholder: "https://hooks.slack.com/services/...", autocomplete: "off" });
+  const submit = el("button", { class: "primary", type: "submit", text: "Add integration" });
+
+  const form = el("form", {}, [
+    el("div", { class: "field" }, [el("label", { text: "Bitbucket repository" }), repoFullName]),
+    el("div", { class: "field", style: "margin-top:8px" }, [el("label", { text: "Integration name" }), name]),
+    el("div", { class: "form-row", style: "margin-top:8px" }, [
+      el("div", { class: "field" }, [el("label", { text: "API token" }), token]),
+      el("div", { class: "field" }, [el("label", { text: "Webhook secret" }), secret]),
+      submit
+    ]),
+    el("div", { class: "field", style: "margin-top:8px" }, [
+      el("label", { text: "Slack webhook (optional)" }),
+      slack,
+      el("p", { class: "dim", text: "Optional. If set, this repository's review notifications go only to this Slack webhook - not to any common/org-wide one." })
+    ])
+  ]);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!repoFullName.value.trim() || !name.value.trim() || !token.value.trim() || !secret.value.trim()) {
+      messageSlot.replaceChildren(notice("error", "Repository, name, API token, and webhook secret are required"));
+      return;
+    }
+    submit.disabled = true;
+    submit.textContent = "saving...";
+    try {
+      const body = {
+        repoFullName: repoFullName.value.trim(),
+        name: name.value.trim(),
+        token: token.value.trim(),
+        webhookSecret: secret.value.trim()
+      };
+      if (slack.value.trim()) body.slackWebhookUrl = slack.value.trim();
+      await api.createIntegration(body);
+      await renderBitbucket(container, { flash: `Integration "${body.name}" added` });
+    } catch (error) {
+      messageSlot.replaceChildren(notice("error", error.message));
+      submit.disabled = false;
+      submit.textContent = "Add integration";
+    }
+  });
+
+  return form;
 }
 
 function reviewModelForm(cfg, messageSlot, container) {
@@ -131,46 +221,6 @@ function reviewModelForm(cfg, messageSlot, container) {
       messageSlot.replaceChildren(notice("error", error.message));
       submit.disabled = false;
       submit.textContent = "Set active model";
-    }
-  });
-
-  return form;
-}
-
-function configForm(messageSlot, container) {
-  const token = el("input", { type: "password", placeholder: "Repository Access Token (ATCTT...)", autocomplete: "off" });
-  const secret = el("input", { type: "password", placeholder: "Webhook secret", autocomplete: "off" });
-  const submit = el("button", { class: "primary", type: "submit", text: "Save" });
-
-  const form = el("form", {}, [
-    el("div", { class: "form-row" }, [
-      el("div", { class: "field" }, [el("label", { text: "API token" }), token]),
-      el("div", { class: "field" }, [el("label", { text: "Webhook secret" }), secret]),
-      submit
-    ])
-  ]);
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const body = {};
-    if (token.value.trim()) body.apiToken = token.value.trim();
-    if (secret.value.trim()) body.webhookSecret = secret.value.trim();
-    if (Object.keys(body).length === 0) {
-      messageSlot.replaceChildren(notice("error", "Enter an API token, a webhook secret, or both"));
-      return;
-    }
-
-    submit.disabled = true;
-    submit.textContent = "saving...";
-    try {
-      await api.saveBitbucketConfig(body);
-      token.value = "";
-      secret.value = "";
-      await renderBitbucket(container, { flash: "Bitbucket configuration saved (encrypted)" });
-    } catch (error) {
-      messageSlot.replaceChildren(notice("error", error.message));
-      submit.disabled = false;
-      submit.textContent = "Save";
     }
   });
 

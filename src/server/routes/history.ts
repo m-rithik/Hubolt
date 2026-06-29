@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, isAdmin } from "../middleware/auth.js";
+import { readableRepoIds } from "../services/repository-access.js";
 import { z } from "zod";
 
 const ListReviewsQuerySchema = z.object({
@@ -103,7 +104,18 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         const { days: daysRaw } = request.query as { days?: string };
         const days = Math.min(Math.max(Number.parseInt(daysRaw ?? "30", 10) || 30, 1), 365);
         const since = new Date(Date.now() - days * 86400000);
-        const orgScope = { orgId: request.orgId!, createdAt: { gte: since } };
+        // Developers see trends only for repos they were granted.
+        const trendIds = await readableRepoIds(context.db, request.orgId!, request.userId, isAdmin(request));
+        const orgScope: { orgId: string; createdAt: { gte: Date }; repoId?: { in: string[] } } = {
+          orgId: request.orgId!,
+          createdAt: { gte: since },
+          ...(trendIds ? { repoId: { in: trendIds } } : {})
+        };
+        const feedbackScope: { orgId: string; createdAt: { gte: Date }; repoId?: { in: string[] } } = {
+          orgId: request.orgId!,
+          createdAt: { gte: since },
+          ...(trendIds ? { repoId: { in: trendIds } } : {})
+        };
 
         const [reviewCount, severityRows, categoryGroups, categoryRows, verdictRows, ruleRows] = await Promise.all([
           context.db.review.count({
@@ -130,12 +142,12 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
           }),
           context.db.findingFeedback.groupBy({
             by: ["verdict"],
-            where: { orgId: request.orgId!, createdAt: { gte: since } },
+            where: feedbackScope,
             _count: { _all: true }
           }),
           context.db.findingFeedback.groupBy({
             by: ["ruleId", "verdict"],
-            where: { orgId: request.orgId!, createdAt: { gte: since } },
+            where: feedbackScope,
             _count: { _all: true }
           })
         ]);
@@ -202,6 +214,12 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         const where: any = {
           orgId: request.orgId
         };
+
+        // Developers may only read reviews for repositories they were granted.
+        const readableIds = await readableRepoIds(context.db, request.orgId!, request.userId, isAdmin(request));
+        if (readableIds) {
+          where.repoId = { in: readableIds };
+        }
 
         if (query.repo) {
           where.repo = { fullName: { contains: query.repo, mode: "insensitive" } };
@@ -279,10 +297,13 @@ export function registerHistoryRoutes(fastify: FastifyInstance, context: ServerC
         // Scope the lookup by org in the query itself so callers from another
         // org receive the same 404 whether or not the review exists. Checking
         // ownership after the fetch would leak review IDs across orgs.
+        const readableIds = await readableRepoIds(context.db, request.orgId!, request.userId, isAdmin(request));
         const review = await context.db.review.findFirst({
           where: {
             id,
-            orgId: request.orgId
+            orgId: request.orgId,
+            // Developers get a 404 for reviews outside their granted repos.
+            ...(readableIds ? { repoId: { in: readableIds } } : {})
           },
           include: {
             repo: true,

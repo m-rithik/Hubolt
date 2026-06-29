@@ -3,7 +3,7 @@ import { ServerContext } from "../app.js";
 import { verifyGitHubSignature } from "../webhooks/signature.js";
 import { classifyBitbucketEvent } from "../webhooks/bitbucket-payload.js";
 import { runBitbucketReview } from "../services/bitbucket-review.js";
-import { getActiveBitbucketWebhookSecret, isBitbucketConfigured } from "../services/bitbucket-config.js";
+import { findIntegrationsByRepoFullName } from "../services/repository-integrations.js";
 
 interface WebhookResponse {
   processed: boolean;
@@ -13,11 +13,12 @@ interface WebhookResponse {
 }
 
 /**
- * Bitbucket webhook ingest. Verifies the signature, recognizes pull request
- * events, and runs a full review in the background (diff fetch, LLM review,
- * persistence, and posting a summary plus inline comments via the
- * BitbucketScmProvider). The webhook is acknowledged immediately so it does not
- * time out while the review runs.
+ * Bitbucket webhook ingest. The body is parsed first to learn which repository
+ * the delivery is for, then that repository's named integration supplies the
+ * webhook secret used to verify the signature and the API token used to post
+ * the review. Parsing before verifying is safe: the parsed value only selects
+ * which secret to check, and nothing acts on the payload until the signature is
+ * validated. The review runs in the background so the webhook returns quickly.
  *
  * Registered inside an encapsulated plugin so the raw-buffer parser (needed to
  * verify the signature over the exact delivered bytes) does not leak into the
@@ -38,24 +39,6 @@ export function registerBitbucketWebhookRoutes(fastify: FastifyInstance, context
         return;
       }
 
-      // The webhook secret is resolved per request from stored config (set in
-      // the dashboard) or the environment, so the dashboard can change it
-      // without a restart. Bitbucket Cloud signs with the same HMAC-SHA256
-      // "sha256=" scheme as GitHub; the header is X-Hub-Signature (no -256).
-      const secret = await getActiveBitbucketWebhookSecret(context.db);
-      if (secret) {
-        const sig = request.headers["x-hub-signature"];
-        const signature = typeof sig === "string" ? sig : undefined;
-        if (!verifyGitHubSignature(secret, rawBody, signature)) {
-          reply.status(401).send({ processed: false, reason: "invalid signature" } satisfies WebhookResponse);
-          return;
-        }
-      } else {
-        // ponytail: secret optional so the trigger can be tested locally; set a
-        // webhook secret (dashboard or env) to enforce verification.
-        request.log.warn("Bitbucket webhook received without a configured secret; signature not verified");
-      }
-
       let body: unknown;
       try {
         body = JSON.parse(rawBody.toString("utf8"));
@@ -72,7 +55,6 @@ export function registerBitbucketWebhookRoutes(fastify: FastifyInstance, context
         reply.status(400).send({ processed: false, reason: classification.reason } satisfies WebhookResponse);
         return;
       }
-
       if (classification.kind === "ignored") {
         request.log.info({ event: eventKey }, "Bitbucket webhook ignored");
         reply.status(202).send({ processed: false, reason: classification.reason } satisfies WebhookResponse);
@@ -80,46 +62,65 @@ export function registerBitbucketWebhookRoutes(fastify: FastifyInstance, context
       }
 
       const event = classification.event;
+      const repoFullName = event.repository.full_name;
+
+      // Resolve the tenant by VERIFYING the signature against each integration
+      // registered for this repo full name (across all orgs). The matching
+      // secret identifies the owning org - never organization.findFirst().
+      const candidates = await findIntegrationsByRepoFullName(context.db, repoFullName);
+      if (candidates.length === 0) {
+        request.log.warn({ repository: repoFullName }, "No integration configured for repository; skipping");
+        reply
+          .status(202)
+          .send({ processed: false, reason: "no integration configured for this repository" } satisfies WebhookResponse);
+        return;
+      }
+
+      const sig = request.headers["x-hub-signature"];
+      const signature = typeof sig === "string" ? sig : undefined;
+      const matches = candidates.filter(
+        (c) => c.webhookSecret && verifyGitHubSignature(c.webhookSecret, rawBody, signature)
+      );
+      if (matches.length === 0) {
+        reply
+          .status(401)
+          .send({ processed: false, reason: "invalid or unverifiable signature" } satisfies WebhookResponse);
+        return;
+      }
+      if (matches.length > 1) {
+        request.log.warn({ repository: repoFullName }, "multiple integrations match this delivery; refusing");
+        reply.status(409).send({ processed: false, reason: "ambiguous integration match" } satisfies WebhookResponse);
+        return;
+      }
+      const integration = matches[0];
+
       request.log.info(
-        {
-          event: eventKey,
-          repository: event.repository.full_name,
-          prNumber: event.pullrequest.id,
-          headSha: event.pullrequest.source.commit.hash,
-          baseSha: event.pullrequest.destination.commit.hash
-        },
+        { event: eventKey, repository: repoFullName, prNumber: event.pullrequest.id, orgId: integration.orgId },
         "Bitbucket webhook TRIGGERED: pull request received"
       );
 
-      // Run the full review in the background and acknowledge immediately so the
-      // webhook does not time out. The pipeline fetches the diff, runs the LLM
-      // review, persists it, and posts a summary plus inline comments. A
-      // duplicate delivery for an already-reviewed head is skipped inside the
-      // pipeline via the persisted pull request state.
-      if (await isBitbucketConfigured(context.db)) {
-        void runBitbucketReview(context.db, {
-          repoFullName: event.repository.full_name,
-          repoName: event.repository.name,
-          prNumber: event.pullrequest.id,
-          action: eventKey ?? "pullrequest"
+      // Run the review in the background; a duplicate delivery for an already
+      // reviewed head is skipped inside the pipeline via the persisted state.
+      void runBitbucketReview(context.db, {
+        orgId: integration.orgId,
+        repoId: integration.repoId,
+        repoFullName,
+        prNumber: event.pullrequest.id,
+        action: eventKey ?? "pullrequest",
+        token: integration.token,
+        slackWebhookUrl: integration.slackWebhookUrl
+      })
+        .then((outcome) => {
+          request.log.info({ prNumber: event.pullrequest.id, status: outcome.status }, "Bitbucket review finished");
         })
-          .then((outcome) => {
-            request.log.info(
-              { prNumber: event.pullrequest.id, status: outcome.status },
-              "Bitbucket review finished"
-            );
-          })
-          .catch((error) => {
-            request.log.error({ err: error, prNumber: event.pullrequest.id }, "Bitbucket review failed");
-          });
-      } else {
-        request.log.warn("Bitbucket API not configured (BITBUCKET_API_TOKEN); skipping review");
-      }
+        .catch((error) => {
+          request.log.error({ err: error, prNumber: event.pullrequest.id }, "Bitbucket review failed");
+        });
 
       reply.status(202).send({
         processed: true,
         prNumber: event.pullrequest.id,
-        repository: event.repository.full_name
+        repository: repoFullName
       } satisfies WebhookResponse);
     });
   });

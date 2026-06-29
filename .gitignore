@@ -13,6 +13,9 @@ build/
 .env
 .env.*
 !.env.example
+.envrc
+.envrc.*
+!.envrc.example
 .hubolt/
 !.hubolt.example.yml
 
@@ -45,7 +48,12 @@ review.json
 # NB: do NOT use *.sql here - prisma/migrations/**/migration.sql must stay tracked.
 backups/
 *.dump
+*.backup
+*.pgdump
 *.sql.gz
+*.sql.bz2
+*.sql.xz
+*.sql.zst
 .last_deploy
 
 # Test and coverage output
@@ -61,6 +69,13 @@ coverage/
 
 # Prisma local artifacts
 prisma/*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-*
+*.sqlite3-*
 prisma/migrations/dev/
 src/generated/
 

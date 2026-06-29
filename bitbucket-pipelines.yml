@@ -15,16 +15,32 @@ image: node:20
 definitions:
   caches:
     npmcache: ~/.npm
+  services:
+    # Postgres for the schema drift check (migrations vs prisma schema). The
+    # default user is a superuser, so Prisma can create/reset the shadow DB.
+    postgres:
+      image: postgres:16-alpine
+      variables:
+        POSTGRES_DB: hubolt_ci
+        POSTGRES_USER: hubolt
+        POSTGRES_PASSWORD: hubolt_ci
   steps:
     - step: &test-build
         name: Test and build
         caches:
           - npmcache
+        services:
+          - postgres
         script:
           - npm ci
           - npm run typecheck
           - npm test
           - npm run build
+          # Fail the build if the committed migrations do not produce the schema
+          # the Prisma client expects (catches "deploy is green but runtime 500s").
+          - export DATABASE_URL="postgresql://hubolt:hubolt_ci@localhost:5432/hubolt_ci"
+          - export SHADOW_DATABASE_URL="postgresql://hubolt:hubolt_ci@localhost:5432/hubolt_ci_shadow"
+          - npm run db:check-drift
 
 pipelines:
   pull-requests:

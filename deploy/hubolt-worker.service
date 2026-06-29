@@ -1,0 +1,34 @@
+# systemd unit for the Hubolt review worker (BullMQ consumer). REQUIRED whenever
+# GitHub webhooks are enabled: the server enqueues PR review jobs and returns
+# 202, but nothing reviews them unless this worker runs.
+#
+# Install:
+#   sudo cp /opt/hubolt/deploy/hubolt-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hubolt-worker
+
+[Unit]
+Description=Hubolt review worker
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=hubolt
+Group=hubolt
+WorkingDirectory=/opt/hubolt
+# dotenv reads .env from WorkingDirectory; the worker needs DATABASE_URL,
+# REDIS_URL, and a GitHub credential (App or token) to fetch diffs and post.
+ExecStart=/usr/bin/node dist/cli/index.js worker start
+Restart=on-failure
+RestartSec=5
+
+Environment=NODE_ENV=production
+Environment=HUBOLT_CACHE_DIR=/opt/hubolt/.cache
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=true
+
+[Install]
+WantedBy=multi-user.target

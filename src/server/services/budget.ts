@@ -79,20 +79,19 @@ export class BudgetService {
       await this.db.$transaction(async (tx) => {
         const now = new Date();
         const dayStart = startOfUtcDay(now);
+        const nextMonth = startOfNextUtcMonth(now);
+
+        await tx.$executeRaw`
+          UPDATE "budgets"
+          SET "currentMonthCostUsd" = 0,
+              "currentMonthResets" = ${nextMonth},
+              "updatedAt" = ${now}
+          WHERE "orgId" = ${orgId}
+            AND "provider" = ${provider}
+            AND "currentMonthResets" <= ${now}
+        `;
 
         if (estimatedCostUsd > 0) {
-          const nextMonth = startOfNextUtcMonth(now);
-
-          await tx.$executeRaw`
-            UPDATE "budgets"
-            SET "currentMonthCostUsd" = 0,
-                "currentMonthResets" = ${nextMonth},
-                "updatedAt" = ${now}
-            WHERE "orgId" = ${orgId}
-              AND "provider" = ${provider}
-              AND "currentMonthResets" <= ${now}
-          `;
-
           const budgetRows = await tx.$queryRaw<BudgetRow[]>`
             UPDATE "budgets"
             SET "currentMonthCostUsd" = "currentMonthCostUsd" + ${estimatedCostUsd},

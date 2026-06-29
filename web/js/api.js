@@ -61,6 +61,19 @@ async function request(path, options = {}) {
 export const api = {
   health: () => request("/health"),
   me: () => request("/auth/me"),
+  login: (username, password) => request("/auth/login", { method: "POST", body: { username, password } }),
+  logout: () => request("/auth/logout", { method: "POST" }),
+  changePassword: (body) => request("/auth/password", { method: "POST", body }),
+
+  users: () => request("/users"),
+  createUser: (body) => request("/users", { method: "POST", body }),
+  updateUser: (userId, body) => request(`/users/${encodeURIComponent(userId)}`, { method: "PATCH", body }),
+  deleteUser: (userId) => request(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+  userRepos: (userId) => request(`/users/${encodeURIComponent(userId)}/repos`),
+  grantUserRepo: (userId, body) => request(`/users/${encodeURIComponent(userId)}/repos`, { method: "POST", body }),
+  revokeUserRepo: (userId, repoId) =>
+    request(`/users/${encodeURIComponent(userId)}/repos/${encodeURIComponent(repoId)}`, { method: "DELETE" }),
+  myRepos: () => request("/me/repos"),
   org: () => request("/orgs/current"),
   renameOrg: (name) => request("/orgs/current", { method: "PATCH", body: { name } }),
   addMember: (body) => request("/orgs/current/members", { method: "POST", body }),
@@ -107,10 +120,15 @@ export const api = {
     request(`/gateway/credentials/${encodeURIComponent(provider)}`, { method: "DELETE" }),
 
   bitbucketConfig: () => request("/bitbucket/config"),
-  saveBitbucketConfig: (body) => request("/bitbucket/config", { method: "POST", body }),
-  clearBitbucketConfig: (field) =>
-    request(`/bitbucket/config/${encodeURIComponent(field)}`, { method: "DELETE" }),
   setBitbucketModel: (body) => request("/bitbucket/config/model", { method: "PUT", body }),
+  setBitbucketThreshold: (level) => request("/bitbucket/config/threshold", { method: "PUT", body: { level } }),
+
+  integrations: () => request("/integrations"),
+  createIntegration: (body) => request("/integrations", { method: "POST", body }),
+  saveIntegration: (repoId, body) =>
+    request(`/integrations/${encodeURIComponent(repoId)}`, { method: "PUT", body }),
+  deleteIntegration: (repoId) =>
+    request(`/integrations/${encodeURIComponent(repoId)}`, { method: "DELETE" }),
 
   repos: () => request("/github-repos"),
   createRepo: (body) => request("/github-repos", { method: "POST", body }),

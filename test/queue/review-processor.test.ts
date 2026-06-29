@@ -60,7 +60,13 @@ function makeScm(overrides: Partial<Record<keyof ScmProvider, unknown>> = {}) {
 }
 
 function makeDb(stateHeadSha: string | null) {
+  let queryRawCalls = 0;
   const tx = {
+    $executeRaw: vi.fn(async () => 0),
+    $queryRaw: vi.fn(async () => {
+      queryRawCalls += 1;
+      return queryRawCalls >= 3 ? [{ requestCount: 1, maxRequestsPerDay: 1000 }] : [];
+    }),
     review: {
       upsert: vi.fn(async (args: any) => ({ id: "review_1", ...args.create }))
     },
@@ -77,6 +83,10 @@ function makeDb(stateHeadSha: string | null) {
           stateHeadSha ? { id: "state_1", repoId: "repo_1", prNumber: 7, headSha: stateHeadSha } : null
         ),
         upsert: vi.fn(async () => undefined)
+      },
+      reviewLock: {
+        deleteMany: vi.fn(async () => undefined),
+        create: vi.fn(async () => ({ id: "lock_1" }))
       },
       auditEvent: {
         create: vi.fn(async () => undefined)
@@ -141,51 +151,126 @@ describe("processReviewJob", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
-  test("skips when the org's monthly budget for the provider is exhausted", async () => {
+  test("loads review config from the base SHA, not the attacker-controlled PR head", async () => {
     const scm = makeScm();
     const { db } = makeDb(null);
-    db.budget = {
-      findUnique: vi.fn(async () => ({
-        id: "b1",
-        provider: "openai",
-        currentMonthCostUsd: 100,
-        monthlyLimitUsd: 50,
-        alertThresholdPct: 80,
-        currentMonthResets: new Date(Date.now() + 1_000_000_000)
-      })),
-      update: vi.fn()
-    };
+
+    await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => makeLlm() });
+
+    // .hubolt.yml (ignore globs / thresholds / rules) must be read at the trusted
+    // base commit so a PR cannot suppress its own review.
+    expect(scm.getFileContent).toHaveBeenCalledWith(expect.stringContaining(".hubolt.yml"), JOB.baseSha);
+    expect(scm.getFileContent).not.toHaveBeenCalledWith(expect.stringContaining(".hubolt.yml"), JOB.headSha);
+  });
+
+  test("skips when reserving the estimated budget is denied (reserve-before-spend)", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    const budgetService = {
+      reserveUsage: vi.fn(async () => ({ allowed: false, reason: "Budget exceeded" })),
+      deductBudget: vi.fn(),
+      refundUsage: vi.fn()
+    } as any;
     const llm = makeLlm();
 
-    const outcome = await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => llm });
+    const outcome = await processReviewJob(JOB, { db, budgetService, createScm: () => scm, createLlm: () => llm });
 
     expect(outcome).toMatchObject({ status: "skipped" });
-    // No model call and no diff fetch once the budget is exhausted.
+    // The reservation happens BEFORE any diff fetch or model call.
+    expect(budgetService.reserveUsage).toHaveBeenCalled();
     expect(scm.listPullRequestFiles).not.toHaveBeenCalled();
     expect((llm as unknown as { review: ReturnType<typeof vi.fn> }).review).not.toHaveBeenCalled();
   });
 
-  test("deducts the review cost from a configured budget after completing", async () => {
+  test("reserves estimated budget before the model call, then reconciles", async () => {
     const scm = makeScm();
     const { db } = makeDb(null);
-    const update = vi.fn(async () => undefined);
-    db.budget = {
-      findUnique: vi.fn(async () => ({
-        id: "b1",
-        provider: "openai",
-        currentMonthCostUsd: 1,
-        monthlyLimitUsd: 100,
-        alertThresholdPct: 80,
-        currentMonthResets: new Date(Date.now() + 1_000_000_000)
-      })),
-      update
-    };
+    const budgetService = {
+      reserveUsage: vi.fn(async () => ({ allowed: true })),
+      deductBudget: vi.fn(async () => undefined),
+      refundUsage: vi.fn(async () => undefined)
+    } as any;
 
-    const outcome = await processReviewJob(JOB, { db, createScm: () => scm, createLlm: () => makeLlm() });
+    const outcome = await processReviewJob(JOB, { db, budgetService, createScm: () => scm, createLlm: () => makeLlm() });
 
     expect(outcome.status).toBe("completed");
-    // deductBudget increments currentMonthCostUsd via budget.update.
-    expect(update).toHaveBeenCalled();
+    // Reservation is made before the LLM call; reconciliation runs after.
+    expect(budgetService.reserveUsage).toHaveBeenCalledOnce();
+  });
+
+  test("skips when another worker already holds the same head lock", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    db.reviewLock.create = vi.fn(async () => {
+      throw Object.assign(new Error("duplicate"), { code: "P2002" });
+    });
+
+    const outcome = await processReviewJob(JOB, {
+      db,
+      createScm: () => scm,
+      createLlm: () => makeLlm()
+    });
+
+    expect(outcome).toMatchObject({ status: "skipped", reason: "head review already in progress" });
+    expect(scm.listPullRequestFiles).not.toHaveBeenCalled();
+  });
+
+  test("refunds budget and rate-limit reservations when pre-model work throws", async () => {
+    const scm = makeScm({
+      listPullRequestFiles: vi.fn(async () => {
+        throw new Error("SCM unavailable");
+      })
+    });
+    const { db } = makeDb(null);
+    const budgetService = {
+      reserveUsage: vi.fn(async () => ({ allowed: true })),
+      deductBudget: vi.fn(async () => undefined),
+      refundUsage: vi.fn(async () => undefined),
+      refundRateLimit: vi.fn(async () => undefined)
+    } as any;
+
+    await expect(
+      processReviewJob(JOB, { db, budgetService, createScm: () => scm, createLlm: () => makeLlm() })
+    ).rejects.toThrow("SCM unavailable");
+
+    expect(budgetService.refundUsage).toHaveBeenCalledWith("org_1", "openai", expect.any(Number));
+    expect(budgetService.refundRateLimit).toHaveBeenCalledWith("org_1", "openai", "gpt-4o-mini");
+  });
+
+  test("resolves the final provider and model before reserving budget", async () => {
+    const scm = makeScm();
+    const { db } = makeDb(null);
+    const budgetService = {
+      reserveUsage: vi.fn(async () => ({ allowed: true })),
+      deductBudget: vi.fn(async () => undefined),
+      refundUsage: vi.fn(async () => undefined),
+      refundRateLimit: vi.fn(async () => undefined)
+    } as any;
+    const createLlm = vi.fn((config: any) => {
+      expect(config.providers).toMatchObject({ llm: "claude", model: "claude-3-5-sonnet-latest" });
+      return makeLlm();
+    });
+
+    const outcome = await processReviewJob(JOB, {
+      db,
+      budgetService,
+      createScm: () => scm,
+      createLlm,
+      resolveReviewConfig: (config) => {
+        config.providers.llm = "claude";
+        config.providers.model = "claude-3-5-sonnet-latest";
+        return config;
+      }
+    });
+
+    expect(outcome.status).toBe("completed");
+    expect(budgetService.reserveUsage).toHaveBeenCalledWith(
+      "org_1",
+      "anthropic",
+      "claude-3-5-sonnet-latest",
+      expect.any(Number)
+    );
+    expect(createLlm).toHaveBeenCalled();
   });
 
   test("runs a full review, persists it, posts results, and records state", async () => {
@@ -221,7 +306,8 @@ describe("processReviewJob", () => {
             repoId: "repo_1",
             reviewId: "review_1",
             file: "src/a.ts",
-            severity: "high"
+            severity: "high",
+            confidence: 0.9
           })
         ]
       })
@@ -324,6 +410,10 @@ describe("processReviewJob", () => {
 
     // The finding moves to the summary: nothing inline, reason in the body.
     expect(outcome).toMatchObject({ status: "completed", findingCount: 1, suppressedByFeedback: 0 });
+    const ruleFeedbackCall = (db.findingFeedback.groupBy as any).mock.calls.find((call: any[]) =>
+      call[0].by.includes("ruleId") && call[0].by.includes("verdict")
+    );
+    expect(ruleFeedbackCall[0].where).toMatchObject({ orgId: "org_1", repoId: "repo_1" });
     expect(scm.createReview).not.toHaveBeenCalled();
     const summaryBody = (scm.createIssueComment as any).mock.calls[0][1];
     expect(summaryBody).toContain("rule dismissed 6 times across reviews");
@@ -494,7 +584,7 @@ describe("processReviewJob", () => {
     expect(tx.finding.createMany).not.toHaveBeenCalled();
   });
 
-  test("dispatches to integrations enabled in repo config and audits delivery", async () => {
+  test("dispatches to integrations enabled in repo config with scoped env and audits delivery", async () => {
     const scm = makeScm({
       getFileContent: vi.fn(async (path: string) => {
         if (path === ".hubolt.yml") {
@@ -507,11 +597,11 @@ describe("processReviewJob", () => {
     const { db } = makeDb(null);
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubEnv("HUBOLT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/test");
 
     try {
       const outcome = await processReviewJob(JOB, {
         db,
+        integrationEnv: { ...process.env, HUBOLT_SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/test" },
         createScm: () => scm,
         createLlm: () => makeLlm()
       });
@@ -528,7 +618,6 @@ describe("processReviewJob", () => {
       );
     } finally {
       vi.unstubAllGlobals();
-      vi.unstubAllEnvs();
     }
   });
 
@@ -546,6 +635,36 @@ describe("processReviewJob", () => {
       );
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  test("does not fall back to the global Slack webhook for GitHub reviews", async () => {
+    const scm = makeScm({
+      getFileContent: vi.fn(async (path: string) => {
+        if (path === ".hubolt.yml") {
+          return "integrations:\n  slack:\n    enabled: true\n    minSeverity: info\n";
+        }
+        if (path === "src/a.ts") return FILE_CONTENT;
+        return null;
+      })
+    });
+    const { db } = makeDb(null);
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("HUBOLT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/global");
+
+    try {
+      const outcome = await processReviewJob(JOB, {
+        db,
+        createScm: () => scm,
+        createLlm: () => makeLlm()
+      });
+
+      expect(outcome.status).toBe("completed");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     }
   });
 

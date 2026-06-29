@@ -2,7 +2,8 @@ import { FastifyInstance } from "fastify";
 import { Prisma } from "../../generated/prisma/index.js";
 import { ServerContext } from "../app.js";
 import { generateApiKey, hashApiKey } from "../api-keys.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, isAdmin, requireAdmin } from "../middleware/auth.js";
+import { setUserRole, deleteOrgUser, UserError } from "../services/user-management.js";
 import { z } from "zod";
 
 const MEMBER_ROLES = ["admin", "reviewer", "viewer"] as const;
@@ -98,13 +99,19 @@ export function registerOrgRoutes(fastify: FastifyInstance, context: ServerConte
           id: org.id,
           name: org.name,
           slug: org.slug,
-          members: org.members.map((m: any) => ({
-            id: m.id,
-            email: m.user.email,
-            name: m.user.name,
-            role: m.role
-          })),
-          apiKeys: org.apiKeys.map((k: any) => ({
+          // Member and API-key inventory is sensitive; only admins receive it.
+          // Non-admins still get org identity (name/slug) for the dashboard.
+          members: isAdmin(request)
+            ? org.members.map((m: any) => ({
+                id: m.id,
+                email: m.user.email,
+                name: m.user.name,
+                role: m.role
+              }))
+            : [],
+          apiKeys: !isAdmin(request)
+            ? []
+            : org.apiKeys.map((k: any) => ({
             id: k.id,
             name: k.name,
             role: k.role,
@@ -452,10 +459,8 @@ export function registerOrgRoutes(fastify: FastifyInstance, context: ServerConte
           reply.status(404).send({ error: "Member not found" });
           return;
         }
-        const updated = await context.db.organizationMember.update({
-          where: { id: memberId },
-          data: { role: body.role }
-        });
+        // Delegate to the guarded service so the last admin cannot be demoted.
+        await setUserRole(context.db, request.orgId!, member.userId, body.role === "admin" ? "admin" : "developer");
         await context.db.auditEvent.create({
           data: {
             orgId: request.orgId!,
@@ -465,8 +470,12 @@ export function registerOrgRoutes(fastify: FastifyInstance, context: ServerConte
             details: JSON.stringify({ from: member.role, to: body.role })
           }
         });
-        reply.send({ id: updated.id, role: updated.role });
+        reply.send({ id: memberId, role: body.role });
       } catch (error) {
+        if (error instanceof UserError) {
+          reply.status(error.statusCode).send({ error: error.message });
+          return;
+        }
         fastify.log.error(error);
         reply.status(500).send({ error: "Failed to update member" });
       }
@@ -493,7 +502,9 @@ export function registerOrgRoutes(fastify: FastifyInstance, context: ServerConte
           reply.status(404).send({ error: "Member not found" });
           return;
         }
-        await context.db.organizationMember.delete({ where: { id: memberId } });
+        // Delegate to the guarded, membership-scoped service (protects last admin
+        // and only removes the global account when this was the sole membership).
+        await deleteOrgUser(context.db, request.orgId!, member.userId);
         await context.db.auditEvent.create({
           data: {
             orgId: request.orgId!,
@@ -505,6 +516,10 @@ export function registerOrgRoutes(fastify: FastifyInstance, context: ServerConte
         });
         reply.send({ success: true });
       } catch (error) {
+        if (error instanceof UserError) {
+          reply.status(error.statusCode).send({ error: error.message });
+          return;
+        }
         fastify.log.error(error);
         reply.status(500).send({ error: "Failed to remove member" });
       }

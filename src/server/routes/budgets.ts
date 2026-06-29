@@ -38,6 +38,9 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
 
       try {
         const budgets = await context.db.budget.findMany({
@@ -69,6 +72,9 @@ export function registerBudgetRoutes(fastify: FastifyInstance, context: ServerCo
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

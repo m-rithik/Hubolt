@@ -30,6 +30,20 @@ function completePayload() {
 }
 
 describe("gateway route role enforcement", () => {
+  test("a viewer key cannot read gateway status or model inventory", async () => {
+    const app = Fastify({ logger: false });
+    const getStatus = vi.fn();
+    await registerGatewayRoutes(app, { getStatus } as any, makeDb("viewer"));
+
+    const status = await app.inject({ method: "GET", url: "/gateway/status", headers: HEADERS });
+    const models = await app.inject({ method: "GET", url: "/gateway/models", headers: HEADERS });
+
+    expect(status.statusCode).toBe(403);
+    expect(models.statusCode).toBe(403);
+    expect(getStatus).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   test("a viewer key cannot spend budget via /gateway/complete", async () => {
     const app = Fastify({ logger: false });
     const processRequest = vi.fn();

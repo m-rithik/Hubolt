@@ -8,6 +8,7 @@ describe("BudgetService", () => {
 
   test("reserves usage with an atomic transaction", async () => {
     const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValueOnce([{ requestCount: 1, maxRequestsPerDay: 1000 }]),
       auditEvent: { create: vi.fn() }
     };

@@ -101,9 +101,9 @@ describe("memory routes", () => {
     const rebuild = await app.inject({ method: "POST", url: "/memory/rebuild", headers: bearerHeaders() });
     expect(rebuild.statusCode).toBe(403);
 
-    // Reads remain available to a viewer.
+    // Memory cards are org-wide, so read-only viewer keys cannot export them.
     const list = await app.inject({ method: "GET", url: "/memory/cards", headers: bearerHeaders() });
-    expect(list.statusCode).toBe(200);
+    expect(list.statusCode).toBe(403);
 
     expect(db.memoryCard.upsert).not.toHaveBeenCalled();
     expect(db.memoryCard.delete).not.toHaveBeenCalled();

@@ -67,7 +67,8 @@ function makeGateway(overrides: Record<string, unknown> = {}) {
       percentageUsed: 0
     }),
     reserveUsage: vi.fn().mockResolvedValue({ allowed: true }),
-    refundUsage: vi.fn().mockResolvedValue(undefined)
+    refundUsage: vi.fn().mockResolvedValue(undefined),
+    refundRateLimit: vi.fn().mockResolvedValue(undefined)
   };
   gateway.budgetManager = {
     refund: vi.fn().mockResolvedValue(undefined),
@@ -625,5 +626,6 @@ describe("LLMGateway", () => {
     expect(gateway.requestQueue.enqueue).not.toHaveBeenCalled();
     expect(gateway.budgetManager.refund).not.toHaveBeenCalled();
     expect(gateway.budgetService.refundUsage).toHaveBeenCalledWith("org_1", "openai", 0.01);
+    expect(gateway.budgetService.refundRateLimit).toHaveBeenCalledWith("org_1", "openai", "gpt-4-mini");
   });
 });

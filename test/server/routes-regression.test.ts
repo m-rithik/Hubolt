@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { registerBudgetRoutes } from "../../src/server/routes/budgets.js";
 import { registerHistoryRoutes } from "../../src/server/routes/history.js";
 import { registerIngestRoutes } from "../../src/server/routes/ingest.js";
+import { registerAuditRoutes } from "../../src/server/routes/audit.js";
 
 const FIXTURE_TOKEN_PARTS = ["test", "route", "token"];
 
@@ -236,6 +237,57 @@ describe("server route regressions", () => {
     const createArgs = db.budget.upsert.mock.calls[0][0].create;
     expect(createArgs.currentMonthResets.toISOString()).toBe("2026-02-01T00:00:00.000Z");
 
+    await app.close();
+  });
+
+  test("viewer keys cannot read org-wide budgets", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue({ ...authApiKey(), role: "viewer", lastUsedAt: new Date() }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      budget: {
+        findMany: vi.fn()
+      }
+    };
+
+    registerBudgetRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/budgets",
+      headers: bearerHeaders()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.budget.findMany).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("viewer keys cannot export org audit logs", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue({ ...authApiKey(), role: "viewer", lastUsedAt: new Date() }),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      auditEvent: {
+        findMany: vi.fn(),
+        count: vi.fn()
+      }
+    };
+
+    registerAuditRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/audit/export",
+      headers: bearerHeaders()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.auditEvent.findMany).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -529,6 +581,42 @@ describe("server route regressions", () => {
         }
       })
     );
+
+    await app.close();
+  });
+
+  test("concurrent duplicate review ingestion is skipped before budget reservation", async () => {
+    const app = Fastify({ logger: false });
+    const db: any = {
+      $transaction: vi.fn(),
+      apiKey: {
+        findUnique: vi.fn().mockResolvedValue(authApiKey()),
+        update: vi.fn().mockResolvedValue(undefined)
+      },
+      repository: {
+        upsert: vi.fn().mockResolvedValue({ id: "repo_1" })
+      },
+      reviewIngestLock: {
+        deleteMany: vi.fn().mockResolvedValue(undefined),
+        create: vi.fn().mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }))
+      },
+      review: {
+        findUnique: vi.fn()
+      }
+    };
+
+    registerIngestRoutes(app, { db } as any);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ingest/review",
+      payload: reviewPayload()
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ success: true, message: "Review ingest is already processing" });
+    expect(db.review.findUnique).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
 
     await app.close();
   });

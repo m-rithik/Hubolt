@@ -149,7 +149,7 @@ export class FeedbackService {
     if (ruleIds.length > 0) {
       const rows = await this.db.findingFeedback.groupBy({
         by: ["ruleId", "verdict"],
-        where: { orgId, ruleId: { in: ruleIds } },
+        where: { orgId, repoId: scope.repoId, ruleId: { in: ruleIds } },
         _count: { _all: true }
       });
       for (const row of rows) {

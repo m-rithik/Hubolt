@@ -6,6 +6,7 @@ set -euo pipefail
 
 APP_DIR=/opt/hubolt
 SERVICE=hubolt-server
+WORKER_SERVICE=hubolt-worker
 BRANCH=main
 HEALTH_URL="http://127.0.0.1:3000/health"
 
@@ -33,6 +34,14 @@ npx prisma migrate deploy
 
 echo "Restarting $SERVICE ..."
 sudo systemctl restart "$SERVICE"
+
+# The worker consumes queued GitHub review jobs; without it, webhooks 202 but no
+# review runs. Restart it only if the unit is installed (enabled on this host).
+if systemctl list-unit-files "$WORKER_SERVICE.service" >/dev/null 2>&1 && \
+   systemctl is-enabled "$WORKER_SERVICE" >/dev/null 2>&1; then
+  echo "Restarting $WORKER_SERVICE ..."
+  sudo systemctl restart "$WORKER_SERVICE"
+fi
 
 echo "Health check ..."
 for _ in $(seq 1 10); do

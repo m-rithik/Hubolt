@@ -26,6 +26,9 @@ export function registerRateLimitRoutes(fastify: FastifyInstance, context: Serve
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
 
       try {
         const now = new Date();
@@ -61,6 +64,9 @@ export function registerRateLimitRoutes(fastify: FastifyInstance, context: Serve
     async (request: AuthenticatedRequest, reply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

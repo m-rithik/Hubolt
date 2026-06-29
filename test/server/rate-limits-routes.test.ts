@@ -33,6 +33,23 @@ function makeDb(role: string) {
 }
 
 describe("rate-limit route role enforcement", () => {
+  test("a viewer key cannot read org-wide rate limits", async () => {
+    const app = Fastify({ logger: false });
+    const db = makeDb("viewer");
+    db.rateLimitWindow.findMany = vi.fn();
+    registerRateLimitRoutes(app, { db });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/rate-limits",
+      headers: HEADERS
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(db.rateLimitWindow.findMany).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   test("a viewer key cannot change a rate limit", async () => {
     const app = Fastify({ logger: false });
     const db = makeDb("viewer");

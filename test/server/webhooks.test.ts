@@ -27,6 +27,9 @@ function pullRequestPayload(overrides: Record<string, unknown> = {}): Record<str
       full_name: "owner/repo",
       html_url: "https://github.com/owner/repo"
     },
+    // Deliveries now require an installation id; the repo row must already be
+    // bound to it (installation events do that, never PR deliveries).
+    installation: { id: 4242 },
     ...overrides
   };
 }
@@ -148,15 +151,18 @@ describe("review job producer", () => {
 });
 
 describe("webhook route", () => {
-  function buildApp(repos: Array<{ id: string; orgId: string }>) {
+  function buildApp(repos: Array<{ id: string; orgId: string; org?: { slug: string } }>) {
     const app = Fastify({ logger: false });
     const enqueue = vi.fn(async (job: ReviewJob) => ({ jobId: reviewJobId(job), created: true }));
     const producer = { enqueue, close: vi.fn() } as unknown as ReviewJobProducer;
     const db: any = {
       repository: {
-        findMany: vi.fn(async () => repos),
+        findMany: vi.fn(async () => repos.map((repo) => ({ org: { slug: "owner" }, ...repo }))),
         update: vi.fn(async () => ({})),
         updateMany: vi.fn(async () => ({ count: 1 }))
+      },
+      webhookDelivery: {
+        create: vi.fn(async () => ({}))
       }
     };
 
@@ -164,15 +170,18 @@ describe("webhook route", () => {
     return { app, enqueue, db };
   }
 
-  function buildAppWithSecrets(secrets: string[], repos: Array<{ id: string; orgId: string }>) {
+  function buildAppWithSecrets(secrets: string[], repos: Array<{ id: string; orgId: string; org?: { slug: string } }>) {
     const app = Fastify({ logger: false });
     const enqueue = vi.fn(async (job: ReviewJob) => ({ jobId: reviewJobId(job), created: true }));
     const producer = { enqueue, close: vi.fn() } as unknown as ReviewJobProducer;
     const db: any = {
       repository: {
-        findMany: vi.fn(async () => repos),
+        findMany: vi.fn(async () => repos.map((repo) => ({ org: { slug: "owner" }, ...repo }))),
         update: vi.fn(async () => ({})),
         updateMany: vi.fn(async () => ({ count: 1 }))
+      },
+      webhookDelivery: {
+        create: vi.fn(async () => ({}))
       }
     };
     registerWebhookRoutes(app, { db } as any, { secrets, producer });
@@ -259,7 +268,7 @@ describe("webhook route", () => {
     await app.close();
   });
 
-  test("captures the App installation id from the payload onto the job and repo", async () => {
+  test("passes the App installation id to the job and does not mutate the repo from a PR delivery", async () => {
     const { app, enqueue, db } = buildApp([{ id: "repo_1", orgId: "org_1" }]);
     const body = Buffer.from(JSON.stringify(pullRequestPayload({ installation: { id: 4242 } })));
 
@@ -270,9 +279,8 @@ describe("webhook route", () => {
 
     expect(response.statusCode).toBe(202);
     expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ installationId: "4242" }));
-    expect(db.repository.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "repo_1" }, data: { installationId: "4242" } })
-    );
+    // Tenant binding fix: installation ids are never assigned from PR deliveries.
+    expect(db.repository.update).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -314,25 +322,80 @@ describe("webhook route", () => {
     const body = Buffer.from(
       JSON.stringify({
         action: "added",
-        installation: { id: 4242 },
+        installation: { id: 4242, account: { login: "owner" } },
         repositories_added: [{ full_name: "owner/repo" }]
       })
     );
 
     const response = await inject(app, body, {
       "x-github-event": "installation_repositories",
+      "x-github-delivery": "delivery-install-1",
       "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
     });
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({ processed: true, reason: "installation updated" });
-    expect(db.repository.updateMany).toHaveBeenCalledWith(
+    expect(db.webhookDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { fullName: { in: ["owner/repo"] } },
+        data: { provider: "github", deliveryId: "delivery-install-1", event: "installation_repositories" }
+      })
+    );
+    expect(db.repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "repo_1" },
         data: { installationId: "4242" }
       })
     );
     expect(enqueue).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("does not link an installation when active registrations are ambiguous", async () => {
+    const { app, enqueue, db } = buildApp([
+      { id: "repo_1", orgId: "org_1" },
+      { id: "repo_2", orgId: "org_2" }
+    ]);
+    const body = Buffer.from(
+      JSON.stringify({
+        action: "added",
+        installation: { id: 4242, account: { login: "owner" } },
+        repositories_added: [{ full_name: "owner/repo" }]
+      })
+    );
+
+    const response = await inject(app, body, {
+      "x-github-event": "installation_repositories",
+      "x-github-delivery": "delivery-install-ambiguous",
+      "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(db.repository.update).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  test("ignores replayed installation deliveries before mutating repositories", async () => {
+    const { app, db } = buildApp([{ id: "repo_1", orgId: "org_1" }]);
+    db.webhookDelivery.create.mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }));
+    const body = Buffer.from(
+      JSON.stringify({
+        action: "added",
+        installation: { id: 4242, account: { login: "owner" } },
+        repositories_added: [{ full_name: "owner/repo" }]
+      })
+    );
+
+    const response = await inject(app, body, {
+      "x-github-event": "installation_repositories",
+      "x-github-delivery": "delivery-install-replay",
+      "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ processed: false, reason: "duplicate delivery" });
+    expect(db.repository.update).not.toHaveBeenCalled();
+    expect(db.repository.updateMany).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -341,13 +404,14 @@ describe("webhook route", () => {
     const body = Buffer.from(
       JSON.stringify({
         action: "removed",
-        installation: { id: 4242 },
+        installation: { id: 4242, account: { login: "owner" } },
         repositories_removed: [{ full_name: "owner/repo" }]
       })
     );
 
     const response = await inject(app, body, {
       "x-github-event": "installation_repositories",
+      "x-github-delivery": "delivery-install-2",
       "x-hub-signature-256": computeGitHubSignature(WEBHOOK_SIGNING_KEY, body)
     });
 

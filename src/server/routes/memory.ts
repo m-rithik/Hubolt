@@ -26,6 +26,10 @@ export function registerMemoryRoutes(fastify: FastifyInstance, context: ServerCo
         reply.status(401).send({ error: "Unauthorized" });
         return;
       }
+      // Memory cards span repositories with no per-repo scoping.
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const { repo } = ListMemoryCardsQuerySchema.parse(request.query);
         const cards = await memoryService.list(request.orgId!, repo);

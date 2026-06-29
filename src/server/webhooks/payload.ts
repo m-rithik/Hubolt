@@ -80,7 +80,10 @@ const InstallationRepoSchema = z.object({ full_name: z.string().min(1) });
 
 const InstallationEventSchema = z.object({
   action: z.string().min(1),
-  installation: z.object({ id: z.number().int().positive() }),
+  installation: z.object({
+    id: z.number().int().positive(),
+    account: z.object({ login: z.string().min(1) }).optional()
+  }),
   repositories: z.array(InstallationRepoSchema).optional(),
   repositories_added: z.array(InstallationRepoSchema).optional(),
   repositories_removed: z.array(InstallationRepoSchema).optional()
@@ -88,6 +91,8 @@ const InstallationEventSchema = z.object({
 
 export interface InstallationChange {
   installationId: string;
+  /** GitHub account that owns this installation, when supplied by GitHub. */
+  accountLogin?: string;
   /** Repos (full names) this installation now covers. */
   linked: string[];
   /** Repos no longer covered (uninstalled, suspended, or removed). */
@@ -113,17 +118,19 @@ export function classifyInstallationEvent(eventName: string | undefined, body: u
 
   const event = parsed.data;
   const installationId = String(event.installation.id);
+  const accountLogin = event.installation.account?.login;
   const names = (repos: typeof event.repositories): string[] => (repos ?? []).map((repo) => repo.full_name);
 
   if (eventName === "installation") {
     if (INSTALLATION_REMOVED_ACTIONS.has(event.action)) {
-      return { installationId, linked: [], unlinked: names(event.repositories) };
+      return { installationId, accountLogin, linked: [], unlinked: names(event.repositories) };
     }
-    return { installationId, linked: names(event.repositories), unlinked: [] };
+    return { installationId, accountLogin, linked: names(event.repositories), unlinked: [] };
   }
 
   return {
     installationId,
+    accountLogin,
     linked: names(event.repositories_added),
     unlinked: names(event.repositories_removed)
   };

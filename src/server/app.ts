@@ -17,6 +17,9 @@ import { registerUiRoutes } from "./routes/ui.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerBitbucketWebhookRoutes } from "./routes/bitbucket-webhooks.js";
 import { registerBitbucketConfigRoutes } from "./routes/bitbucket-config.js";
+import { registerRepositoryIntegrationRoutes } from "./routes/repository-integrations.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+import { registerUserRoutes } from "./routes/users.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { LLMGateway } from "./services/llm-gateway.js";
 import { createReviewJobProducer } from "../queue/review-jobs.js";
@@ -29,6 +32,7 @@ export interface ServerContext {
 
 export async function createApp(context: ServerContext): Promise<FastifyInstance> {
   const fastify = Fastify({
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
     logger: {
       level: process.env.LOG_LEVEL || "info",
       transport: {
@@ -53,6 +57,8 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
   await registerUiRoutes(fastify);
 
   registerHealthRoutes(fastify, context);
+  registerAuthRoutes(fastify, context);
+  registerUserRoutes(fastify, context);
   registerIngestRoutes(fastify, context);
   registerHistoryRoutes(fastify, context);
   registerAuditRoutes(fastify, context);
@@ -108,7 +114,26 @@ export async function createApp(context: ServerContext): Promise<FastifyInstance
   // and secret are resolved per request from stored config or the environment.
   registerBitbucketWebhookRoutes(fastify, context);
   registerBitbucketConfigRoutes(fastify, context);
-  console.log("Bitbucket integration enabled (webhook + dashboard config)");
+  registerRepositoryIntegrationRoutes(fastify, context);
+  console.log("Bitbucket integration enabled (webhook + dashboard config + named integrations)");
 
   return fastify;
+}
+
+function parseTrustProxy(value: string | undefined): boolean | number | string | string[] {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+  const hopCount = Number.parseInt(value, 10);
+  if (Number.isInteger(hopCount) && hopCount > 0) {
+    return hopCount;
+  }
+  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
 }

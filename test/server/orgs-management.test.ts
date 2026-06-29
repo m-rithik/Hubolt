@@ -19,11 +19,16 @@ function makeDb(authRole: string = "admin") {
       update: vi.fn((args: any) => Promise.resolve({ id: "org_1", name: args.data.name, slug: "acme" }))
     },
     user: {
-      upsert: vi.fn((args: any) => Promise.resolve({ id: "u1", email: args.where.email, name: args.create.name }))
+      upsert: vi.fn((args: any) => Promise.resolve({ id: "u1", email: args.where.email, name: args.create.name })),
+      delete: vi.fn().mockResolvedValue({})
     },
     organizationMember: {
       upsert: vi.fn((args: any) => Promise.resolve({ id: "m1", role: args.create.role })),
       findUnique: vi.fn(() => Promise.resolve({ id: "m1", orgId: "org_1", userId: "u1", role: "viewer" })),
+      // The guarded service resolves the member by (orgId, userId) and counts
+      // memberships/admins; count >1 keeps the membership-scoped delete path.
+      findFirst: vi.fn(() => Promise.resolve({ id: "m1", orgId: "org_1", userId: "u1", role: "viewer" })),
+      count: vi.fn().mockResolvedValue(2),
       update: vi.fn((args: any) => Promise.resolve({ id: "m1", role: args.data.role })),
       delete: vi.fn().mockResolvedValue({})
     },

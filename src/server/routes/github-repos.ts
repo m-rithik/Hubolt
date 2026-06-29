@@ -2,7 +2,8 @@ import { FastifyInstance } from "fastify";
 import { Queue } from "bullmq";
 import { z } from "zod";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, isAdmin, requireAdmin } from "../middleware/auth.js";
+import { readableRepoIds } from "../services/repository-access.js";
 import { gitHubAppInstallUrl, isGitHubAppConfigured } from "../services/github-app.js";
 import { CredentialManager } from "../services/credential-manager.js";
 import { REVIEW_QUEUE_NAME } from "../../queue/review-jobs.js";
@@ -51,8 +52,9 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
       }
 
       try {
+        const ids = await readableRepoIds(context.db, request.orgId!, request.userId, isAdmin(request));
         const repos = await context.db.repository.findMany({
-          where: { orgId: request.orgId, disabledAt: null },
+          where: { orgId: request.orgId, disabledAt: null, ...(ids ? { id: { in: ids } } : {}) },
           orderBy: { createdAt: "desc" }
         });
 
@@ -105,6 +107,32 @@ export function registerGitHubRepoRoutes(fastify: FastifyInstance, context: Serv
       }
 
       try {
+        const org = await context.db.organization.findUnique({
+          where: { id: request.orgId! },
+          select: { slug: true }
+        });
+        if (!org) {
+          reply.status(404).send({ error: "Organization not found" });
+          return;
+        }
+        if (normalizeGithubOwner(org.slug) !== normalizeGithubOwner(identity.owner)) {
+          reply.status(403).send({ error: "Repository owner must match this organization's slug" });
+          return;
+        }
+
+        const conflictingRepo = await context.db.repository.findFirst({
+          where: {
+            fullName: identity.fullName,
+            orgId: { not: request.orgId! },
+            disabledAt: null
+          },
+          select: { id: true }
+        });
+        if (conflictingRepo) {
+          reply.status(409).send({ error: "Repository is already registered by another organization" });
+          return;
+        }
+
         const repo = await context.db.repository.upsert({
           where: { orgId_fullName: { orgId: request.orgId!, fullName: identity.fullName } },
           create: {
@@ -319,11 +347,15 @@ async function listGatewayProviders(
   try {
     const manager = new CredentialManager(db);
     const creds = await manager.listCredentials(orgId);
-    return creds.map((cred) => ({
-      id: cred.provider,
-      label: providerLabel(cred.provider),
-      defaultModel: providerDefaultModel(cred.provider)
-    }));
+    return creds
+      // Only real LLM providers are selectable; internal pseudo-credentials
+      // (e.g. bitbucket_threshold) live in the same table and must be excluded.
+      .filter((cred) => Boolean(getProviderInfo(normalizeProviderId(cred.provider))))
+      .map((cred) => ({
+        id: cred.provider,
+        label: providerLabel(cred.provider),
+        defaultModel: providerDefaultModel(cred.provider)
+      }));
   } catch {
     return [];
   }
@@ -341,6 +373,10 @@ function providerLabel(provider: string): string {
 
 function providerDefaultModel(provider: string): string | null {
   return getProviderInfo(normalizeProviderId(provider))?.defaultModel ?? null;
+}
+
+function normalizeGithubOwner(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 /**

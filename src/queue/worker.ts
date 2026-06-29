@@ -60,7 +60,10 @@ export function startReviewWorker(options: StartReviewWorkerOptions): ReviewWork
       }),
     createLlm:
       options.deps?.createLlm ??
-      ((config, job) => createReviewLlm(options.db, job, config))
+      ((config, job) => createReviewLlm(options.db, job, config)),
+    resolveReviewConfig:
+      options.deps?.resolveReviewConfig ??
+      ((config, job) => resolveReviewConfig(options.db, job, config))
   };
 
   const worker = new Worker(
@@ -121,22 +124,29 @@ function attachWorkerLogging(worker: Worker): void {
 }
 
 /**
- * Resolve the LLM for a review job: the org's gateway-selected provider/model
- * wins, then the repo/.hubolt.yml/env config. The API key comes from the org's
- * encrypted gateway credential; when no credential is configured, apiKey stays
- * undefined and the provider factory falls back to its environment variable.
+ * Build the LLM from the finalized review config. resolveReviewConfig applies
+ * the org's gateway-selected provider/model before budget reservation.
  */
 async function createReviewLlm(db: PrismaClient, job: ReviewJob, config: RepoConfig): Promise<LLMProvider> {
-  let provider = config.providers.llm;
-  let model = config.providers.model;
+  const provider = config.providers.llm;
+  const model = config.providers.model;
 
+  const apiKey = await resolveGatewayApiKey(db, job.orgId, provider);
+  return getLLMProvider(provider, { model, apiKey });
+}
+
+/**
+ * Resolve the org dashboard-selected provider/model before budget reservation
+ * and report persistence. createReviewLlm receives this finalized config.
+ */
+async function resolveReviewConfig(db: PrismaClient, job: ReviewJob, config: RepoConfig): Promise<RepoConfig> {
   try {
     const org = await db.organization.findUnique({
       where: { id: job.orgId },
       select: { reviewLlmProvider: true, reviewLlmModel: true }
     });
-    if (org?.reviewLlmProvider) provider = org.reviewLlmProvider;
-    if (org?.reviewLlmModel) model = org.reviewLlmModel;
+    if (org?.reviewLlmProvider) config.providers.llm = org.reviewLlmProvider;
+    if (org?.reviewLlmModel) config.providers.model = org.reviewLlmModel;
   } catch (error) {
     console.warn(
       "Could not load org review model; using config defaults:",
@@ -144,8 +154,7 @@ async function createReviewLlm(db: PrismaClient, job: ReviewJob, config: RepoCon
     );
   }
 
-  const apiKey = await resolveGatewayApiKey(db, job.orgId, provider);
-  return getLLMProvider(provider, { model, apiKey });
+  return config;
 }
 
 /**

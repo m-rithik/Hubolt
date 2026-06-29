@@ -29,6 +29,9 @@ model Organization {
   memoryCards         MemoryCard[]
   reviews             Review[]
   findings            Finding[]
+  integrations        RepositoryIntegration[]
+  sessions            Session[]
+  webhookDeliveries   WebhookDelivery[]
 
   @@map("organizations")
 }
@@ -98,9 +101,11 @@ model OrganizationMember {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  role String @default("viewer")
+  // "admin" | "developer". Legacy "viewer" is treated as "developer" in code.
+  role String @default("developer")
 
-  apiKeys ApiKey[]
+  apiKeys  ApiKey[]
+  accesses RepositoryAccess[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -114,12 +119,42 @@ model User {
   email String  @unique
   name  String?
 
-  orgs OrganizationMember[]
+  // Username/password login. Nullable so existing API-key-only users are
+  // unaffected until credentials are set. passwordHash is a scrypt hash.
+  username           String?  @unique
+  passwordHash       String?
+  status             String   @default("active") // active | disabled
+  mustChangePassword Boolean  @default(false)
+
+  orgs     OrganizationMember[]
+  sessions Session[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
+}
+
+model Session {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  // sha256 of the opaque token; the plaintext is shown to the client once only.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  ip         String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([orgId])
+  @@map("sessions")
 }
 
 model ApiKey {
@@ -158,6 +193,13 @@ model Repository {
   fullName String
   url      String
 
+  // Repository metadata.
+  provider      String  @default("github") // github | bitbucket
+  workspace     String?
+  project       String?
+  defaultBranch String?
+  environment   String?
+
   // GitHub App installation that grants access to this repo. Null when the
   // repo is registered but the App is not installed (or no PR has been seen
   // yet); the worker mints an installation token from this id to post reviews.
@@ -174,11 +216,67 @@ model Repository {
   reviews           Review[]
   findings          Finding[]
   pullRequestStates PullRequestState[]
+  integration       RepositoryIntegration?
+  accesses          RepositoryAccess[]
+  reviewLocks       ReviewLock[]
+  ingestLocks       ReviewIngestLock[]
 
   @@unique([orgId, fullName])
   @@index([fullName])
   @@index([installationId])
   @@map("repositories")
+}
+
+model RepositoryIntegration {
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  // Exactly one integration per repository.
+  repoId String     @unique
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  provider String // github | bitbucket
+  name     String // human label, e.g. "Payments Service Bitbucket Connection"
+
+  // Secrets are encrypted at rest (secret-box). The *Fingerprint columns are
+  // sha256 of the plaintext and are unique, enforcing "no credential reuse
+  // across integrations" without ever decrypting.
+  encryptedToken           String
+  tokenFingerprint         String  @unique
+  tokenLast4               String  @default("")
+  encryptedWebhookSecret   String?
+  webhookSecretFingerprint String? @unique
+
+  // Optional per-repo Slack incoming webhook. When set, this repo's review
+  // notifications go here instead of any common/org-wide Slack webhook.
+  encryptedSlackWebhook String?
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@map("repository_integrations")
+}
+
+model RepositoryAccess {
+  id     String     @id @default(cuid())
+  repoId String
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  memberId String
+  member   OrganizationMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  accessLevel String  @default("read") // read | actions
+  grantedById String? // member/user id recorded for audit (no FK)
+
+  createdAt DateTime @default(now())
+
+  @@unique([repoId, memberId])
+  @@index([memberId])
+  @@map("repository_access")
 }
 
 model PullRequestState {
@@ -194,6 +292,54 @@ model PullRequestState {
 
   @@unique([repoId, prNumber])
   @@map("pull_request_states")
+}
+
+model ReviewLock {
+  id     String     @id @default(cuid())
+  repoId String
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  prNumber Int
+  headSha  String
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([repoId, prNumber, headSha])
+  @@index([expiresAt])
+  @@map("review_locks")
+}
+
+model ReviewIngestLock {
+  id     String     @id @default(cuid())
+  repoId String
+  repo   Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  fingerprint String
+  expiresAt   DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([repoId, fingerprint])
+  @@index([expiresAt])
+  @@map("review_ingest_locks")
+}
+
+model WebhookDelivery {
+  id    String       @id @default(cuid())
+  orgId String?
+  org   Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  provider   String
+  deliveryId String
+  event      String
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, deliveryId])
+  @@index([createdAt])
+  @@index([orgId])
+  @@map("webhook_deliveries")
 }
 
 model Review {

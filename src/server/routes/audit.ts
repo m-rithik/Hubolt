@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { ServerContext } from "../app.js";
-import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated } from "../middleware/auth.js";
+import { AuthenticatedRequest, createAuthMiddleware, isAuthenticated, requireAdmin } from "../middleware/auth.js";
 import { z } from "zod";
 
 const ExportAuditQuerySchema = z.object({
@@ -30,6 +30,10 @@ export function registerAuditRoutes(fastify: FastifyInstance, context: ServerCon
     async (request: AuthenticatedRequest, reply: FastifyReply) => {
       if (!isAuthenticated(request)) {
         reply.status(401).send({ error: "Unauthorized" });
+        return;
+      }
+      // Audit is org-wide security activity with no per-repo scoping.
+      if (!requireAdmin(request, reply)) {
         return;
       }
 

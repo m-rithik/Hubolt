@@ -252,6 +252,10 @@ export class BitbucketScmProvider implements ScmProvider {
       url = body.next ?? null;
     }
 
+    if (url) {
+      throw new BitbucketScmError(`Bitbucket pagination exceeded ${MAX_PAGES} pages while fetching ${firstUrl}`, 502);
+    }
+
     return results;
   }
 

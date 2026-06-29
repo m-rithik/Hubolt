@@ -12,6 +12,7 @@ set -euo pipefail
 
 APP_DIR=/opt/hubolt
 SERVICE=hubolt-server
+WORKER_SERVICE=hubolt-worker
 
 cd "$APP_DIR"
 
@@ -34,4 +35,10 @@ set +a
 npx prisma migrate deploy
 
 sudo systemctl restart "$SERVICE"
+
+if systemctl list-unit-files "$WORKER_SERVICE.service" >/dev/null 2>&1 && \
+   systemctl is-enabled "$WORKER_SERVICE" >/dev/null 2>&1; then
+  sudo systemctl restart "$WORKER_SERVICE"
+fi
+
 echo "Rollback complete: $(git rev-parse --short HEAD)"

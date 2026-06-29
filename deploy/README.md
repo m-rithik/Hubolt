@@ -90,7 +90,7 @@ sudo -u postgres psql -c "CREATE DATABASE hubolt_db OWNER hubolt;"
 Use the same password in `DATABASE_URL` below.
 
 Need a managed database instead later? PostgreSQL is the right engine for this
-app (the schema and 16 migrations are Postgres). To switch to a managed Postgres
+app (the schema and 17 migrations are Postgres). To switch to a managed Postgres
 (e.g. a cloud provider's managed Postgres, Supabase, RDS), only `DATABASE_URL`
 changes; nothing in the app code does. Redis can likewise move to a managed
 Redis by changing `REDIS_URL`.
@@ -116,11 +116,14 @@ sudo -u hubolt chmod 600 .env     # owner-only
 
 ```bash
 sudo cp /opt/hubolt/deploy/hubolt-server.service /etc/systemd/system/
+# REQUIRED for GitHub reviews: the worker consumes queued PR jobs. Without it the
+# webhook returns 202 but no review ever runs.
+sudo cp /opt/hubolt/deploy/hubolt-worker.service /etc/systemd/system/
 sudo systemctl daemon-reload
 
-# Allow the hubolt user to restart only its own service without a password
+# Allow the hubolt user to restart only its own services without a password
 # (needed so deploy.sh can restart over SSH).
-echo 'hubolt ALL=(root) NOPASSWD: /bin/systemctl restart hubolt-server, /bin/systemctl status hubolt-server' \
+echo 'hubolt ALL=(root) NOPASSWD: /bin/systemctl restart hubolt-server, /bin/systemctl status hubolt-server, /bin/systemctl restart hubolt-worker, /bin/systemctl status hubolt-worker' \
   | sudo tee /etc/sudoers.d/hubolt-server
 sudo chmod 440 /etc/sudoers.d/hubolt-server
 ```
@@ -134,6 +137,8 @@ cd /opt/hubolt
 sudo -u hubolt bash -c 'npm ci && npm run build'
 sudo -u hubolt bash -c 'set -a; . ./.env; set +a; npx prisma migrate deploy'
 sudo systemctl enable --now hubolt-server
+# Start the worker too (required for GitHub PR reviews to be processed).
+sudo systemctl enable --now hubolt-worker
 
 # Verify
 systemctl status hubolt-server --no-pager
@@ -285,7 +290,6 @@ with TLS is the recommended production setup.
 
 ## 14. Optional: background worker
 
-If you use the LLM gateway queue, run the worker as a second service. Copy
-`hubolt-server.service` to `hubolt-worker.service`, change `Description` and set
-`ExecStart=/usr/bin/node dist/cli/index.js worker`, then enable it. Skip this
-until you actually use the queue.
+If you use GitHub webhook reviews, run the worker as a second service. The repo
+ships `deploy/hubolt-worker.service`; copy it to `/etc/systemd/system/`, then
+enable it. Skip this only if you do not use the GitHub webhook queue.

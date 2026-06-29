@@ -111,6 +111,9 @@ export async function registerGatewayRoutes(
     "/gateway/status",
     { preHandler: [authMiddleware] },
     async (request: AuthenticatedRequest, reply: FastifyReply) => {
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const orgId = request.orgId!;
         const status = await gateway.getStatus(orgId);
@@ -181,6 +184,9 @@ export async function registerGatewayRoutes(
     "/gateway/models",
     { preHandler: [authMiddleware] },
     async (request: AuthenticatedRequest, reply: FastifyReply) => {
+      if (!requireAdmin(request, reply)) {
+        return;
+      }
       try {
         const models = Object.fromEntries(
           Object.entries(MODEL_CATALOG).map(([provider, providerModels]) => [
