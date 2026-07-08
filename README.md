@@ -1,6 +1,6 @@
 <div align="center">
 
-# Hubolt
+# Hubolt blah blah
 
 **Context-aware AI code review that is local-first, not local-only.**
 
